@@ -1,11 +1,11 @@
-# Information Gain
+# Information Gain（中文）
 
-个人美股信息优势与 AI 前沿情报工作台。当前项目从原 PDSA AI 简报扩展为三条线：
+个人美股信息优势与 AI 前沿情报工作台。当前项目从原 PDSA AI 简报扩展为四条主线：
 
 - 实时美股信息获取：源注册表、事件流、后续接直播 ASR。
 - 美股自动研究：研究队列、证据链 memo 骨架、后续接 deep research 与自省循环。
 - AI 前沿：保留 RSS 聚合，并逐步映射到美股标的和市场影响。
-- 政治持仓：追踪特朗普与美国行政分支官员 OGE 公开交易披露，作为政策/利益冲突/市场叙事信号。
+- 政治持仓：追踪特朗普与美国行政分支官员 OGE 公开交易披露，作为政策、利益冲突和市场叙事信号。
 
 ## 启动
 
@@ -26,7 +26,7 @@ npm run dev:all
 - `GET /api/source-registry`：统一源注册表，包含 Bloomberg TV、CNBC、Fox Business、SEC、公司 IR、宏观源、免费媒体和 AI RSS 源。
 - `GET /api/events?limit=60`：统一事件流。目前会合并已保存转录事件与 AI RSS 事件；后续直播 ASR 会写入同一个事件模型。
 - `GET /api/events?refresh=1`：刷新 AI RSS 后重建事件流。
-- `POST /api/events/transcripts`：写入一段直播 ASR 转录，服务端会生成带来源、时间戳、ticker、主题、证据片段的事件。
+- `POST /api/events/transcripts`：写入一段直播 ASR 转录，服务端会生成带来源、时间戳、ticker、主题和证据片段的事件。
 - `GET /api/research/queue`：读取研究队列。
 - `POST /api/research/queue`：从事件或手动问题创建研究任务，自动生成证据链 memo 骨架和自省问题。
 - `GET /api/serenity/research-system`：读取 Serenity 方法论系统，合并本地 X archive、固定 thesis cards、手动候选卡和证据片段。
@@ -164,11 +164,11 @@ Discovery run 现已由可执行的 V2 协议约束，而不是只保存展示�
 - `POST /api/serenity/discovery-runs/:id/sync/obsidian`：幂等同步当前 run note。
 - `POST /api/serenity/discovery-runs/:id/close`：仅在全部关闭条件满足时关闭 run。
 
-完整数据模型和同步规则见 [`docs/serenity-v2.md`](docs/serenity-v2.md)。
+完整数据模型和同步规则见 [`docs/serenity-v2.zh-CN.md`](docs/serenity-v2.zh-CN.md)。
 
-## AI Stock Radar Coverage Board
+## AI 股票雷达覆盖看板
 
-`/ai-stock-radar` 页面参考 BewinQuant 式 AI 股票雷达结构，当前用于覆盖审计而不是实时交易：
+`/ai-stock-radar` 页面参考 BewinQuant 式 AI 股票雷达结构，当前用于覆盖审计，而不是实时交易：
 
 - Core Research 30：大盘 anchor、算力、云、光通信、电力、EDA、应用等基准标的。
 - AI 子板块热力图：20 个子板块按“已覆盖 / 部分覆盖 / 遗漏”标记。
@@ -177,7 +177,7 @@ Discovery run 现已由可执行的 V2 协议约束，而不是只保存展示�
 - 右侧详情：显示选中 ticker、选中板块、当前已搜集市场和缺口结论。
 - 遗漏板块可一键加入 `/research-queue`，后续按 Serenity discovery skill 做 24-72h 深挖。
 
-## Obsidian Sync Rule
+## Obsidian 同步规则
 
 任何 Information Gain 系统演进、research workflow、source policy、dashboard、skill 或自动化规则的改动，都必须同步更新 Obsidian。
 

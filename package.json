@@ -6,7 +6,13 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "dev:all": "concurrently -k -n api,web -c cyan,green \"node server/index.js\" \"vite --host 0.0.0.0 --port 3001\"",
+    "asr:bloomberg": "node scripts/asr-worker.js",
+    "audio:list": "scripts/capture-audio.sh --list-devices",
+    "serenity:domains:once": "node scripts/serenity-domain-scheduler.js",
+    "serenity:domains:dry-run": "node scripts/serenity-domain-scheduler.js --dry-run",
+    "serenity:domains:watch": "node scripts/serenity-domain-scheduler.js --watch",
     "server": "node server/index.js",
+    "test": "node --test",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0"
   },
