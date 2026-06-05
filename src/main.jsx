@@ -4,16 +4,23 @@ import {
   BarChart3,
   Bell,
   Check,
+  Clock3,
   ClipboardList,
+  Database,
+  ExternalLink,
   FileSearch,
   Filter,
   Globe2,
+  Landmark,
+  ListChecks,
   MessageSquareText,
   Newspaper,
+  Radio,
   RefreshCcw,
   Rocket,
   Search,
   Settings2,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   UsersRound,
@@ -21,6 +28,11 @@ import {
 import './styles.css';
 
 const routes = [
+  { path: '/realtime-flow', label: '实时信息流', icon: Radio },
+  { path: '/research-queue', label: '研究队列', icon: ListChecks },
+  { path: '/serenity-research', label: 'Serenity研究', icon: Search },
+  { path: '/ai-stock-radar', label: 'AI股票雷达', icon: BarChart3 },
+  { path: '/official-holdings', label: '官员持仓', icon: Landmark },
   { path: '/about-ai', label: 'AI简报', icon: Newspaper },
   { path: '/voc-insights', label: 'VOC洞察', icon: MessageSquareText },
 ];
@@ -83,6 +95,228 @@ const sampleVocText = [
   'App Store｜销售运营｜价格有点贵，但生成日报和客户纪要确实省时间。',
 ].join('\n');
 
+const radarCoreStocks = [
+  ['NVDA', 'NVIDIA', 'Compute / GPU / ASIC', '$215.21', '+1.76%', 87, '需求锚：GPU、CUDA、NVLink、rack-scale AI。'],
+  ['AMD', 'Advanced Micro Devices', 'Compute / GPU / ASIC', '$145.19', '+11.44%', 72, 'MI 系列和 CPU/GPU 组合，适合作为 NVDA 以外的算力锚。'],
+  ['AVGO', 'Broadcom', 'Networking / ASIC', '$430.00', '+4.23%', 84, '自研 ASIC、交换芯片、光通信链条的核心大盘 anchor。'],
+  ['MRVL', 'Marvell Technology', 'Networking / Optical', '$170.13', '+6.32%', 75, 'ASIC、DSP、光互联与 cloud custom silicon。'],
+  ['INTC', 'Intel', 'Foundry / Packaging', '$124.89', '+13.93%', 58, '代工、先进封装和玻璃基板路线锚。'],
+  ['ARM', 'Arm Holdings', 'Compute / CPU IP', '$213.27', '-0.02%', 76, 'CPU IP 和边缘/云端低功耗计算。'],
+  ['QCOM', 'Qualcomm', 'Consumer AI / Device', '$219.09', '+8.17%', 69, '端侧 AI、手机和边缘推理。'],
+  ['TSM', 'Taiwan Semiconductor', 'Foundry', '$411.68', '-0.60%', 85, 'AI 芯片制造和先进封装核心 anchor。'],
+  ['ASML', 'ASML Holding', 'Semi Equipment', '$1,592.02', '+4.97%', 83, 'EUV/DUV 光刻瓶颈。'],
+  ['AMAT', 'Applied Materials', 'Semi Equipment', '$435.35', '+6.02%', 74, '沉积、刻蚀和先进封装设备。'],
+  ['CDNS', 'Cadence Design', 'EDA / Design Software', '$382.70', '+1.63%', 78, '芯片设计软件和仿真。'],
+  ['SNPS', 'Synopsys', 'EDA / Design Software', '$516.48', '+2.23%', 79, 'EDA、IP、验证。'],
+  ['MU', 'Micron Technology', 'Memory / Storage', '$746.79', '+15.49%', 73, 'HBM/DRAM/NAND 周期和 AI memory。'],
+  ['MSFT', 'Microsoft', 'Cloud / Hyperscaler', '$415.06', '-1.36%', 86, 'Azure、OpenAI、Maia/数据中心 capex。'],
+  ['GOOGL', 'Alphabet', 'Cloud / Hyperscaler', '$400.71', '+0.68%', 82, 'TPU、Gemini、广告/云。'],
+  ['AMZN', 'Amazon', 'Cloud / Hyperscaler', '$272.68', '+0.56%', 84, 'AWS、Trainium、物流机器人。'],
+  ['META', 'Meta Platforms', 'AI Application', '$609.63', '-1.16%', 80, '推荐系统、AI capex、开源模型。'],
+  ['ORCL', 'Oracle', 'AI Cloud / GPU Cloud', '$195.94', '+0.69%', 70, 'AI cloud capacity 和数据库客户。'],
+  ['ANET', 'Arista Networks', 'Networking / Optical', '$141.77', '+0.01%', 77, 'AI 数据中心以太网交换。'],
+  ['VRT', 'Vertiv', 'Data Center Infrastructure', '$339.97', '-0.01%', 75, '液冷、电源、机架级数据中心基础设施。'],
+  ['ETN', 'Eaton', 'Power / Grid', '$401.61', '+0.59%', 71, '电力设备、配电、数据中心电力。'],
+  ['GEV', 'GE Vernova', 'Power / Grid', '$1,040.15', '-0.52%', 68, '电网、电力设备、能源基础设施。'],
+  ['CEG', 'Constellation Energy', 'Power / Nuclear', '$303.63', '-2.46%', 69, '核电和数据中心电力 PPA。'],
+  ['VST', 'Vistra', 'Power / Nuclear', '$147.72', '-4.05%', 66, '电力和数据中心负载叙事。'],
+  ['DELL', 'Dell Technologies', 'Data Center Infrastructure', '$260.31', '+13.05%', 67, 'AI server 交付和企业基础设施。'],
+  ['SNOW', 'Snowflake', 'Data / Software Platform', '$152.45', '-0.83%', 64, '数据平台和 AI 数据工作流。'],
+  ['PLTR', 'Palantir', 'Data / Software Platform', '$137.80', '+0.55%', 68, '企业 AI 平台、国防/商业数据工作流。'],
+  ['CRWD', 'CrowdStrike', 'Cybersecurity', '$527.77', '+4.36%', 70, 'AI security 与 endpoint/cloud security。'],
+  ['NOW', 'ServiceNow', 'AI Application', '$991.18', '-2.58%', 72, '企业 workflow AI。'],
+  ['APP', 'AppLovin', 'AI Application', '$468.55', '-6.08%', 65, 'AI 广告优化和应用变现。'],
+].map(([ticker, name, sector, price, move, score, thesis]) => ({ ticker, name, sector, price, move, score, thesis }));
+
+const radarAnomalies = [
+  ['UEC', 'Power / Grid / Nuclear', '+297.3%', 'missing'],
+  ['AKAM', 'Data Center / Edge', '+26.5%', 'missing'],
+  ['MU', 'Memory / Storage', '+15.49%', 'covered'],
+  ['HUBS', 'AI Application', '-19.03%', 'missing'],
+  ['IONQ', 'Quantum / Frontier', '+2.02%', 'missing'],
+  ['QBTS', 'Quantum / Frontier', '+1.78%', 'missing'],
+  ['NET', 'Networking / Edge', '-23.75%', 'partial'],
+  ['NBIS', 'AI Cloud / GPU Cloud', '+3.51%', 'covered'],
+  ['CRWV', 'AI Cloud / GPU Cloud', '+1.68%', 'partial'],
+  ['IREN', 'AI Cloud / GPU Cloud', '+1.68%', 'partial'],
+  ['SOUN', 'AI Application', '+0.99%', 'missing'],
+  ['TEM', 'Healthcare AI', '+0.83%', 'missing'],
+].map(([ticker, theme, move, coverage]) => ({ ticker, theme, move, coverage }));
+
+const radarSubsectors = [
+  ['Power / Grid / Nuclear', '+0.59%', 'covered', ['POWL', 'HPS.A', 'ETN', 'GEV', 'CEG'], '我们覆盖了电网/变压器/AI 数据中心电力，但核电燃料链和 UEC/CCJ/LEU 尚未深入。'],
+  ['Data / Software Platform', '-1.68%', 'missing', ['SNOW', 'PLTR', 'DDOG', 'MDB'], '缺企业数据平台、AI 数据管道、semantic layer 的 Serenity 式瓶颈拆解。'],
+  ['Data Center Infrastructure', '+1.80%', 'covered', ['VRT', 'DELL', 'MOD', 'NVT'], '已开始液冷/机架电力/GB200 rack density；还需补 cold plate/CDU 供应商。'],
+  ['Industrial Automation / Robotics', '-0.38%', 'partial', ['TER', 'ROK', 'ISRG', 'SYM'], '只有“物理 AI”概念，还没拆执行器、伺服、传感、仿真、工厂自动化供应链。'],
+  ['Networking / Optical', '+1.70%', 'covered', ['ANET', 'AAOI', 'SIVE', 'LITE', 'COHR'], 'CPO/光模块/激光器/InP 是当前覆盖最深的线。'],
+  ['AI Application', '-1.40%', 'missing', ['NOW', 'APP', 'SOUN', 'HUBS'], '我们偏 infra，几乎没有做应用层的新增需求和财务弹性筛选。'],
+  ['Compute / GPU / ASIC', '+4.45%', 'partial', ['NVDA', 'AMD', 'AVGO', 'MRVL', 'ARM'], '我们把它当需求锚，而不是系统覆盖 GPU/ASIC 载体。'],
+  ['Cybersecurity', '+3.11%', 'missing', ['CRWD', 'PANW', 'ZS', 'NET'], 'AI security / inference security / identity / endpoint 没有进入 discovery run。'],
+  ['Semiconductor Equipment', '+3.37%', 'partial', ['ASML', 'AMAT', 'LRCX', 'KLAC'], '只作为 packaging/glass substrate 的辅助线，没有单独拆设备瓶颈。'],
+  ['Cloud / Hyperscaler', '+0.32%', 'partial', ['MSFT', 'AMZN', 'GOOGL', 'ORCL'], '已有 NBIS/Neocloud，但 hyperscaler 资本开支、租赁、GPU cloud 还未成完整看板。'],
+  ['Financial / Research Data', '-0.79%', 'missing', ['SPGI', 'MSCI', 'MCO', 'FDS'], '没有覆盖 AI agent 对金融数据、研究终端、数据授权的新增需求。'],
+  ['Autonomous / Mobility', '+1.59%', 'missing', ['TSLA', 'MBLY', 'AUR', 'OUST'], '没有拆自动驾驶、LiDAR、地图、车载计算供应链。'],
+  ['Critical Minerals / Rare Earths', '-1.64%', 'missing', ['MP', 'UUUU', 'LAC', 'ALB'], '缺电力/机器人/电池/稀土磁材上游。'],
+  ['Healthcare AI', '+0.11%', 'missing', ['TEM', 'RXRX', 'SDGR', 'EXAI'], '没有覆盖医疗 AI、药物发现、医院 workflow AI。'],
+  ['Memory / Storage', '+4.85%', 'covered', ['MU', 'SNDK', 'SIMO', 'WDC'], '已覆盖推理内存/存储/KV cache，但需要更强一手证据。'],
+  ['AI Cloud / GPU Cloud', '-1.37%', 'covered', ['NBIS', 'CRWV', 'IREN', 'ORCL'], '已有 NBIS/Neocloud；CRWV/IREN 需要补融资结构和客户合同。'],
+  ['Foundry / Packaging', '+2.07%', 'covered', ['TSM', 'INTC', 'TSEM', 'IBDNF', 'AT&S'], '已扩展到 glass core substrate、silicon capacitors、advanced packaging。'],
+  ['Quantum / Frontier Computing', '+2.19%', 'missing', ['IONQ', 'QBTS', 'RGTI', 'ARQQ'], '截图有量子板块，我们当前没有研究。'],
+  ['Consumer AI / Device', '-2.20%', 'missing', ['AAPL', 'QCOM', 'META', 'RPI'], '只覆盖 RPI 社区需求，没有系统覆盖端侧 AI device。'],
+  ['EDA / Design Software', '+1.93%', 'missing', ['CDNS', 'SNPS', 'ANSS', 'ALTR'], 'AI 芯片设计复杂度带来的 EDA 瓶颈未拆。'],
+].map(([name, move, coverage, tickers, gap]) => ({ name, move, coverage, tickers, gap }));
+
+const radarStats = [
+  ['AI Universe', '191', 'Benchmark universe'],
+  ['Core', '30', 'Core Research 30'],
+  ['High Conv.', '15', 'High-conv sample'],
+  ['覆盖缺口', `${radarSubsectors.filter((item) => item.coverage === 'missing').length}`, 'Missing sectors'],
+  ['已覆盖', `${radarSubsectors.filter((item) => item.coverage === 'covered').length}`, 'Covered by our research'],
+  ['部分覆盖', `${radarSubsectors.filter((item) => item.coverage === 'partial').length}`, 'Needs deeper chain work'],
+];
+
+const radarSourceStack = [
+  {
+    layer: '价格与技术指标',
+    screenshotSignals: ['latest price', '1D/5D/1M/3M/6M/YTD/1Y', 'RSI14', 'MACD', 'volatility', 'relative volume', '52W high/low'],
+    preferredSources: ['Polygon/Massive 或同级行情 API', 'IEX Cloud / Nasdaq Data Link', '交易所或 SIP 数据'],
+    currentStatus: 'missing',
+    filterRule: '只用于价格、量、技术状态和异动触发；不能证明产业 thesis。',
+  },
+  {
+    layer: '基本面与估值',
+    screenshotSignals: ['revenue', 'gross margin', 'R&D', 'EPS', 'FCF', 'ROE', 'PE/PS/EV-FCF', 'debt ratio'],
+    preferredSources: ['SEC EDGAR / companyfacts', '公司 10-K/10-Q/8-K', 'FMP/Polygon/Finnhub 作为结构化 vendor 兜底'],
+    currentStatus: 'missing',
+    filterRule: '优先 SEC/IR；vendor 数字只能作为索引，关键数值必须回到 filing 或财报材料。',
+  },
+  {
+    layer: '公司事件与新闻',
+    screenshotSignals: ['FMP news', 'press release', 'Yahoo Finance source row', 'earnings / corporate actions'],
+    preferredSources: ['公司 IR 新闻稿', 'SEC 8-K', 'BusinessWire / GlobeNewswire / PRNewswire 原始稿', 'FMP/Yahoo 只做聚合提示'],
+    currentStatus: 'partial',
+    filterRule: '聚合新闻必须追到原文；Motley Fool / Yahoo 二手文章不进入核心证据，只能触发待验证任务。',
+  },
+  {
+    layer: '分析师与预期',
+    screenshotSignals: ['price target', 'rating', 'forward EPS / PE', 'analyst consensus'],
+    preferredSources: ['Finnhub/FMP analyst endpoint', '券商报告摘要', '公司 guidance / earnings call'],
+    currentStatus: 'missing',
+    filterRule: '只能衡量市场共识和 misclassification；不能作为技术瓶颈证据。',
+  },
+  {
+    layer: 'AI 产业分类与角色',
+    screenshotSignals: ['AI industry category', 'AI role', 'AI exposure score', 'investment certainty'],
+    preferredSources: ['手工 taxonomy', '公司 segment/KPI', '客户/伙伴披露', '标准组织和行业会议材料'],
+    currentStatus: 'partial',
+    filterRule: '分类必须能映射到收入暴露或供应链位置；不接受“AI 概念”标签。',
+  },
+  {
+    layer: 'Serenity 深层瓶颈',
+    screenshotSignals: ['不是截图主维度；这是我们的增量维度'],
+    preferredSources: ['公司 IR/filings', '专利', 'OCP/JEDEC/OFC/ECOC/MLPerf', 'DOE/EIA/FERC/LBNL/NERC', '客户 BOM 和伙伴披露'],
+    currentStatus: 'covered',
+    filterRule: '用于 thesis 核心；必须同时有供应链位置、供应商数量、财务转译和反证条件。',
+  },
+  {
+    layer: '社区与开发者发现',
+    screenshotSignals: ['截图没有明显展示，但类似 Serenity/RPI 路径需要'],
+    preferredSources: ['Serenity archive', 'GitHub repo/activity', 'Reddit/X/HN/论坛', '开发者采购讨论'],
+    currentStatus: 'partial',
+    filterRule: '只做 discovery；除非能映射到采购/缺货/收入，否则不提高置信度。',
+  },
+];
+
+const radarDimensionAudit = [
+  {
+    group: 'Universe / Screener',
+    screenshotDimensions: ['191 股票池', 'Core 30', 'High Conv. 15', '筛选表', '行业/AI角色/评级/地区/市值/估值/状态过滤'],
+    ourStatus: 'missing',
+    action: '需要建立 AI Universe registry，而不是只靠 thesis cards；每个 ticker 要有 sector、AI role、coverage status、research priority。',
+  },
+  {
+    group: 'Market / Technical',
+    screenshotDimensions: ['最新价', '日内涨跌', '1D/5D/1M/3M/6M/YTD/1Y', 'RSI14', 'MACD', '20D volatility', '成交量/相对成交量', '52W high/low', 'beta'],
+    ourStatus: 'missing',
+    action: '接行情 API 后只做异动和 risk context；不要用技术指标生成 Serenity thesis。',
+  },
+  {
+    group: 'Fundamental / Valuation',
+    screenshotDimensions: ['营收', '毛利率', 'R&D', 'EPS', 'FCF margin', 'ROE', 'PE TTM', 'Forward PE', 'PS', 'EV/FCF', 'FCF yield', 'debt ratio'],
+    ourStatus: 'missing',
+    action: '用 SEC/IR 为主，vendor 数据做缓存；重点补“财务转译”校验。',
+  },
+  {
+    group: 'AI Exposure Score',
+    screenshotDimensions: ['Business Quality', 'Moat', 'AI Exposure', 'Growth', 'Profitability', 'Valuation', 'Momentum', 'Risk', 'Wisdom/Consensus'],
+    ourStatus: 'partial',
+    action: '我们已有 thesis score，但缺横向股票评分。需要把 Serenity score 和常规质量/估值/动量评分分开。',
+  },
+  {
+    group: 'News / Catalyst',
+    screenshotDimensions: ['新闻与事件', 'press release', '财报新闻', '异常波动理由', '来源名和时间'],
+    ourStatus: 'partial',
+    action: '已有 RSS/事件流，但缺 ticker 绑定、事件分类、source quality 和去噪规则。',
+  },
+  {
+    group: 'Industry Heatmap',
+    screenshotDimensions: ['20 个 AI layer', '每层股票数', '涨跌统计', '强弱/RS 排名'],
+    ourStatus: 'partial',
+    action: '已补板块审计，但还没接入真实 universe 和层内统计。',
+  },
+  {
+    group: 'Supply-chain Thesis',
+    screenshotDimensions: ['截图弱；右侧 AI 角色里有部分描述'],
+    ourStatus: 'covered',
+    action: '这是我们相比截图应该强化的维度：需求链、瓶颈、供应商数量、public carrier、验证/反证。',
+  },
+];
+
+const challengeGateRules = [
+  {
+    name: '状态机',
+    status: 'required',
+    rule: 'Research Run 只能按 V2 状态机推进，并且只能关闭为 closed_no_candidate 或 closed_candidate_found。',
+    failAction: '关闭条件不足时保持 active_research；只有硬阻塞才标记 blocked。',
+  },
+  {
+    name: '候选挑战',
+    status: 'required',
+    rule: '升级前回答为什么现在、替代路线、遗漏供应商、业务纯度、定价、最强 bear case 和证伪条件等 14 条问题。',
+    failAction: '任一问题答不清，不能升级为 high_conviction_candidate。',
+  },
+  {
+    name: '反方搜索',
+    status: 'required',
+    rule: '每个 surviving candidate 至少 3 条 counter-search：替代路线、内部供应、扩产、稀释、延迟采用、short report。',
+    failAction: '反方不足时，标记 Active Research，不给高置信评分。',
+  },
+  {
+    name: '最低证据门槛',
+    status: 'required',
+    rule: '3+ Core Evidence、2+ 独立来源家族、1+ 非候选公司来源，并记录证据元数据、财务路径、定价分析和 falsifier。',
+    failAction: '未满足时不得关闭 Research Run。',
+  },
+  {
+    name: '同步门槛',
+    status: 'required',
+    rule: '关闭前必须同步动态看板、Obsidian、关闭报告和下一轮 Research Run 队列。',
+    failAction: 'Obsidian 同步失败时保持 active_research 或标记 blocked。',
+  },
+];
+
+const challengeQueries = [
+  '<company/market> competitor supplier',
+  '<technology> alternative',
+  '<customer> internal sourcing',
+  '<component> capacity expansion',
+  '<company> gross margin risk',
+  '<company> dilution debt cash burn',
+  '<technology> delayed adoption',
+  '<standard> not adopted',
+  '<company> short report',
+];
+
 async function apiFetch(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
@@ -124,8 +358,8 @@ function App() {
             <Sparkles size={20} />
           </div>
           <div>
-            <strong>PDSA AI Workbench</strong>
-            <span>方案架构师资讯与客户洞察工具</span>
+            <strong>Information Gain</strong>
+            <span>美股信息优势与 AI 前沿工作台</span>
           </div>
         </div>
         <nav className="nav-list" aria-label="主导航">
@@ -153,7 +387,7 @@ function App() {
       <main className="main-content">
         <header className="topbar">
           <div>
-            <span className="eyebrow">PDSA 工作台</span>
+            <span className="eyebrow">Information Gain</span>
             <h1>{activeRoute.label}</h1>
           </div>
           <div className="top-actions">
@@ -166,6 +400,11 @@ function App() {
           </div>
         </header>
 
+        {path === '/realtime-flow' && <RealtimeFlow />}
+        {path === '/research-queue' && <ResearchQueue />}
+        {path === '/serenity-research' && <SerenityResearch />}
+        {path === '/ai-stock-radar' && <AiStockRadar />}
+        {path === '/official-holdings' && <OfficialHoldings />}
         {path === '/about-ai' && <AboutAi />}
         {path === '/voc-insights' && <VocInsights />}
       </main>
@@ -175,7 +414,7 @@ function App() {
 
 function normalizePath(rawPath) {
   if (routes.some((route) => route.path === rawPath)) return rawPath;
-  return '/about-ai';
+  return routes[0].path;
 }
 
 function formatBriefingTime(value) {
@@ -300,6 +539,1696 @@ function buildLocalCommunicationPack(posts, product, dimensions) {
     ],
     evidenceToCollect: ['客户真实流程截图或日志', '竞品同场景反馈', '上线前后耗时、成本、满意度指标'],
   };
+}
+
+function formatEventTime(value) {
+  if (!value) return '时间未知';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '时间未知';
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatPercent(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return '--';
+  return `${Math.round(parsed * 100)}%`;
+}
+
+function formatMoney(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return '--';
+  if (parsed >= 1_000_000_000) return `$${(parsed / 1_000_000_000).toFixed(1)}B`;
+  if (parsed >= 1_000_000) return `$${(parsed / 1_000_000).toFixed(1)}M`;
+  if (parsed >= 1_000) return `$${Math.round(parsed / 1_000)}K`;
+  return `$${Math.round(parsed)}`;
+}
+
+function formatDateShort(value) {
+  if (!value) return '未知';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+  });
+}
+
+function joinCompact(items, fallback = '暂无') {
+  const values = Array.isArray(items) ? items.filter(Boolean) : [];
+  return values.length ? values.join('、') : fallback;
+}
+
+function formatTicker(value) {
+  const ticker = String(value || '').replace(/^\$/, '').trim().toUpperCase();
+  return ticker ? `$${ticker}` : '待定义';
+}
+
+function scoreClass(score) {
+  if (score >= 82) return 'score-badge strong';
+  if (score >= 70) return 'score-badge watch';
+  return 'score-badge muted';
+}
+
+function coverageLabel(value) {
+  if (value === 'covered') return '已覆盖';
+  if (value === 'partial') return '部分覆盖';
+  if (value === 'missing') return '遗漏';
+  return '未标记';
+}
+
+function formatSourceType(type) {
+  const labels = {
+    live_tv: '直播',
+    official: '官方',
+    macro: '宏观',
+    market_media: '媒体',
+    social: '社交',
+    ai_frontier: 'AI',
+    political_disclosure: '官员持仓',
+    community_alpha: '社区Alpha',
+  };
+  return labels[type] || type || '未知';
+}
+
+function formatTrustTier(tier) {
+  const labels = {
+    primary_official: '一手官方',
+    primary_company: '公司一手',
+    professional_media: '专业媒体',
+    secondary_interpretation: '二手解读',
+    social_discovery: '舆情发现',
+    public_records_aggregator: '公开记录聚合',
+  };
+  return labels[tier] || tier || '未标记';
+}
+
+function RealtimeFlow() {
+  const [sources, setSources] = useState([]);
+  const [eventsData, setEventsData] = useState({ events: [], summary: {}, sourceHealth: {} });
+  const [state, setState] = useState('loading');
+  const [message, setMessage] = useState('');
+  const [activeType, setActiveType] = useState('all');
+
+  const loadRealtime = async ({ refresh = false } = {}) => {
+    setState('loading');
+    setMessage('');
+    try {
+      const [sourcePayload, eventPayload] = await Promise.all([
+        apiFetch('/api/source-registry'),
+        apiFetch(`/api/events?limit=60${refresh ? '&refresh=1' : ''}`),
+      ]);
+      setSources(sourcePayload.sources || []);
+      setEventsData(eventPayload);
+      setState('ready');
+    } catch (error) {
+      setState('error');
+      setMessage('实时事件接口暂不可用，请检查后端服务。');
+    }
+  };
+
+  useEffect(() => {
+    loadRealtime();
+  }, []);
+
+  const addToResearchQueue = async (event) => {
+    setMessage('正在加入研究队列');
+    try {
+      await apiFetch('/api/research/queue', {
+        method: 'POST',
+        body: JSON.stringify({ event }),
+      });
+      setMessage('已加入研究队列');
+    } catch (error) {
+      setMessage('加入研究队列失败');
+    }
+  };
+
+  const events = eventsData.events || [];
+  const sourceTypes = ['all', ...Array.from(new Set(sources.map((source) => source.type)))];
+  const visibleSources = activeType === 'all' ? sources : sources.filter((source) => source.type === activeType);
+  const liveSources = sources.filter((source) => source.type === 'live_tv');
+  const officialSources = sources.filter((source) => ['official', 'macro'].includes(source.type));
+  const needsVerification = events.filter((event) => event.verification?.needsVerification).length;
+  const health = eventsData.sourceHealth || {};
+
+  return (
+    <section className="workspace-grid">
+      <div className="wide-panel realtime-hero">
+        <div className="hero-copy">
+          <span className="badge blue">Phase 1 · Source Registry + Event Flow</span>
+          <h2>把直播、官方源、媒体和 AI 前沿统一成可验证事件流</h2>
+        </div>
+        <div className="metric-strip">
+          <Metric icon={Radio} label="直播候选源" value={liveSources.length} />
+          <Metric icon={ShieldCheck} label="官方与宏观源" value={officialSources.length} />
+          <Metric icon={Database} label="当前事件" value={events.length} />
+        </div>
+      </div>
+
+      <div className="content-panel span-2">
+        <PanelHeader icon={Radio} title="实时事件流" meta={eventsData.generatedAt ? `${formatEventTime(eventsData.generatedAt)} 更新` : '等待同步'} />
+        <div className="briefing-tools">
+          <span className={`data-state ${state}`}>{state === 'loading' ? '同步中' : state === 'error' ? message : `${health.ok || 0}/${health.total || 0} RSS 正常`}</span>
+          <div className="toolbar-actions">
+            <button className="small-button" onClick={() => loadRealtime({ refresh: true })} disabled={state === 'loading'}>
+              <RefreshCcw size={14} />
+              <span>刷新事件</span>
+            </button>
+          </div>
+        </div>
+
+        {message && state !== 'error' && <div className="inline-note">{message}</div>}
+
+        <div className="event-list">
+          {events.length ? (
+            events.map((event) => (
+              <article className="event-card" key={event.id}>
+                <div className="row-head">
+                  <span>{formatSourceType(event.source?.type)} · {event.source?.name || '未知来源'}</span>
+                  <span>{formatEventTime(event.publishedAt)}</span>
+                </div>
+                <h3>{event.url ? <a href={event.url} target="_blank" rel="noreferrer">{event.title}</a> : event.title}</h3>
+                <p>{event.summary}</p>
+                <div className="event-meta-grid">
+                  <div>
+                    <strong>标的</strong>
+                    <span>{joinCompact(event.tickers)}</span>
+                  </div>
+                  <div>
+                    <strong>主题</strong>
+                    <span>{joinCompact(event.themes?.slice(0, 4))}</span>
+                  </div>
+                  <div>
+                    <strong>置信度</strong>
+                    <span>{formatPercent(event.score?.confidence)}</span>
+                  </div>
+                </div>
+                <div className="event-actions">
+                  <span className={event.verification?.needsVerification ? 'verify-pill warning' : 'verify-pill'}>
+                    {event.verification?.needsVerification ? '待交叉验证' : '已验证'}
+                  </span>
+                  <button className="small-button" onClick={() => addToResearchQueue(event)}>
+                    <ListChecks size={14} />
+                    <span>加入研究</span>
+                  </button>
+                </div>
+              </article>
+            ))
+          ) : (
+            <div className="empty-state">
+              <Radio size={24} />
+              <strong>{state === 'loading' ? '正在构建事件流' : '暂无事件'}</strong>
+              <span>{state === 'error' ? message : '后续直播 ASR 和 RSS 会进入这里。'}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="content-panel">
+        <PanelHeader icon={Database} title="源注册表" meta={`${visibleSources.length}/${sources.length || 0} 个`} />
+        <div className="source-filter-row">
+          {sourceTypes.map((type) => (
+            <button className={activeType === type ? 'selected' : ''} key={type} onClick={() => setActiveType(type)}>
+              {type === 'all' ? '全部' : formatSourceType(type)}
+            </button>
+          ))}
+        </div>
+        <div className="registry-list">
+          {visibleSources.slice(0, 18).map((source) => (
+            <div className="registry-row" key={source.id}>
+              <div>
+                <strong>{source.name}</strong>
+                <span>{source.group} · {formatTrustTier(source.trustTier)} · {source.captureMethod}</span>
+              </div>
+              {source.url ? (
+                <a href={source.url} target="_blank" rel="noreferrer" title="打开源">
+                  <ExternalLink size={15} />
+                </a>
+              ) : (
+                <span className="status-text">{source.status}</span>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="source-health">
+          <div>
+            <strong>验证压力</strong>
+            <span>{needsVerification} 条待验证</span>
+          </div>
+          <p>
+            <span>直播源边界</span>
+            <small>只采集当前机器可合法播放的音频，不绕 DRM。</small>
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ResearchQueue() {
+  const [queueData, setQueueData] = useState({ items: [], summary: {} });
+  const [eventsData, setEventsData] = useState({ events: [] });
+  const [state, setState] = useState('loading');
+  const [message, setMessage] = useState('');
+  const [question, setQuestion] = useState('NVDA / AI capex：市场是否低估 hyperscaler 资本开支持续性？');
+  const [tickers, setTickers] = useState('NVDA, MSFT, GOOG, AMZN, AMD, AVGO');
+
+  const loadQueue = async () => {
+    setState('loading');
+    setMessage('');
+    try {
+      const [queuePayload, eventPayload] = await Promise.all([
+        apiFetch('/api/research/queue'),
+        apiFetch('/api/events?limit=12'),
+      ]);
+      setQueueData(queuePayload);
+      setEventsData(eventPayload);
+      setState('ready');
+    } catch (error) {
+      setState('error');
+      setMessage('研究队列接口暂不可用。');
+    }
+  };
+
+  useEffect(() => {
+    loadQueue();
+  }, []);
+
+  const createManualTask = async () => {
+    setMessage('正在创建研究任务');
+    try {
+      await apiFetch('/api/research/queue', {
+        method: 'POST',
+        body: JSON.stringify({ question, tickers }),
+      });
+      setMessage('已创建研究任务');
+      await loadQueue();
+    } catch (error) {
+      setMessage('创建研究任务失败');
+    }
+  };
+
+  const createFromEvent = async (event) => {
+    setMessage('正在从事件创建研究任务');
+    try {
+      await apiFetch('/api/research/queue', {
+        method: 'POST',
+        body: JSON.stringify({ event }),
+      });
+      setMessage('已加入研究队列');
+      await loadQueue();
+    } catch (error) {
+      setMessage('加入研究队列失败');
+    }
+  };
+
+  const items = queueData.items || [];
+  const suggestedEvents = (eventsData.events || []).filter((event) => event.tickers?.length).slice(0, 5);
+
+  return (
+    <section className="workspace-grid">
+      <div className="wide-panel research-hero">
+        <div className="hero-copy">
+          <span className="badge green">Research Queue · Evidence First</span>
+          <h2>事件先进入研究队列，再产出证据链 memo 和自省问题</h2>
+        </div>
+        <div className="metric-strip">
+          <Metric icon={ListChecks} label="队列任务" value={items.length} />
+          <Metric icon={Clock3} label="待研究" value={(queueData.summary?.byStatus?.queued || 0)} />
+          <Metric icon={ShieldCheck} label="高优先级" value={items.filter((item) => item.priority <= 2).length} />
+        </div>
+      </div>
+
+      <div className="content-panel">
+        <PanelHeader icon={FileSearch} title="手动加入研究问题" meta={state === 'loading' ? '同步中' : '可创建'} />
+        <label className="field">
+          <span>核心问题</span>
+          <textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={5} />
+        </label>
+        <label className="field">
+          <span>相关标的</span>
+          <input value={tickers} onChange={(event) => setTickers(event.target.value)} />
+        </label>
+        <button className="primary-action" onClick={createManualTask}>
+          <ListChecks size={18} />
+          <span>加入研究队列</span>
+        </button>
+        {message && <div className="inline-note">{message}</div>}
+      </div>
+
+      <div className="content-panel span-2">
+        <PanelHeader icon={ListChecks} title="研究队列" meta={`${items.length} 个任务`} />
+        <div className="queue-list">
+          {items.length ? (
+            items.map((item) => (
+              <article className="queue-card" key={item.id}>
+                <div className="row-head">
+                  <span>Priority {item.priority} · {item.status}</span>
+                  <span>{formatEventTime(item.createdAt)}</span>
+                </div>
+                <h3>{item.question}</h3>
+                <div className="tag-list">
+                  {(item.tickers || []).map((ticker) => <span key={ticker}>{ticker}</span>)}
+                  {(item.themes || []).slice(0, 4).map((theme) => <span key={theme}>{theme}</span>)}
+                </div>
+                <div className="memo-grid">
+                  <div>
+                    <strong>必须收集证据</strong>
+                    <ul>{(item.memoSkeleton?.requiredEvidence || []).slice(0, 3).map((value) => <li key={value}>{value}</li>)}</ul>
+                  </div>
+                  <div>
+                    <strong>自省问题</strong>
+                    <ul>{(item.memoSkeleton?.counterEvidencePrompts || []).slice(0, 3).map((value) => <li key={value}>{value}</li>)}</ul>
+                  </div>
+                </div>
+              </article>
+            ))
+          ) : (
+            <div className="empty-state">
+              <ListChecks size={24} />
+              <strong>{state === 'loading' ? '正在读取研究队列' : '暂无研究任务'}</strong>
+              <span>{state === 'error' ? message : '可以手动加入问题，或从实时事件生成任务。'}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="content-panel span-3">
+        <PanelHeader icon={Database} title="可转研究的近期事件" meta={`${suggestedEvents.length} 条`} />
+        <div className="suggested-event-grid">
+          {suggestedEvents.map((event) => (
+            <article className="suggested-event" key={event.id}>
+              <div>
+                <strong>{event.title}</strong>
+                <span>{event.source?.name} · {joinCompact(event.tickers)}</span>
+              </div>
+              <button className="small-button" onClick={() => createFromEvent(event)}>
+                <ListChecks size={14} />
+                <span>加入</span>
+              </button>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SerenityResearch() {
+  const [payload, setPayload] = useState({
+    methodology: [],
+    focusAreas: [],
+    summary: {},
+    thesisCards: [],
+    topSymbols: [],
+    evidenceFeed: [],
+    discoveryRuns: [],
+    protocol: {},
+    source: {},
+  });
+  const [state, setState] = useState('loading');
+  const [message, setMessage] = useState('');
+  const [selectedFocus, setSelectedFocus] = useState('all');
+  const [activeCardId, setActiveCardId] = useState('');
+  const [builder, setBuilder] = useState({
+    title: '',
+    primaryTicker: '',
+    tickers: '',
+    focusArea: 'AI 光通信 / CPO',
+    layer: '第三层：待定义供应链层级',
+    demandSource: '',
+    chain: '',
+    chokepoint: '',
+    businessCarrier: '',
+    financialTranslation: '',
+    marketMisclassification: '',
+    validationSignals: '',
+    falsifiers: '',
+    keywords: '',
+  });
+
+  const loadSystem = async () => {
+    setState('loading');
+    setMessage('');
+    try {
+      const data = await apiFetch('/api/serenity/research-system');
+      setPayload({
+        ...data,
+        methodology: Array.isArray(data.methodology) ? data.methodology : [],
+        focusAreas: Array.isArray(data.focusAreas) ? data.focusAreas : [],
+        thesisCards: Array.isArray(data.thesisCards) ? data.thesisCards : [],
+        topSymbols: Array.isArray(data.topSymbols) ? data.topSymbols : [],
+        evidenceFeed: Array.isArray(data.evidenceFeed) ? data.evidenceFeed : [],
+        discoveryRuns: Array.isArray(data.discoveryRuns) ? data.discoveryRuns : [],
+      });
+      setState('ready');
+    } catch (error) {
+      setState('error');
+      setMessage('Serenity 研究系统接口暂不可用。');
+    }
+  };
+
+  useEffect(() => {
+    loadSystem();
+  }, []);
+
+  const updateBuilder = (key, value) => {
+    setBuilder((current) => ({ ...current, [key]: value }));
+  };
+
+  const createCustomCard = async () => {
+    setMessage('正在保存候选卡');
+    try {
+      await apiFetch('/api/serenity/thesis-cards', {
+        method: 'POST',
+        body: JSON.stringify(builder),
+      });
+      setMessage('已保存候选卡');
+      setBuilder((current) => ({
+        ...current,
+        title: '',
+        primaryTicker: '',
+        tickers: '',
+        demandSource: '',
+        chain: '',
+        chokepoint: '',
+        businessCarrier: '',
+        financialTranslation: '',
+        marketMisclassification: '',
+        validationSignals: '',
+        falsifiers: '',
+        keywords: '',
+      }));
+      await loadSystem();
+    } catch (error) {
+      setMessage('保存候选卡失败：需要标题、需求源和瓶颈。');
+    }
+  };
+
+  const addToResearchQueue = async (card) => {
+    setActiveCardId(card.id);
+    setMessage('正在加入研究队列');
+    try {
+      await apiFetch(`/api/serenity/thesis-cards/${encodeURIComponent(card.id)}/research`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      setMessage(`${formatTicker(card.primaryTicker)} 已加入研究队列`);
+    } catch (error) {
+      setMessage('加入研究队列失败');
+    } finally {
+      setActiveCardId('');
+    }
+  };
+
+  const summary = payload.summary || {};
+  const cards = payload.thesisCards || [];
+  const focusOptions = payload.focusAreas || [];
+  const visibleCards = selectedFocus === 'all' ? cards : cards.filter((card) => card.focusArea === selectedFocus);
+  const topSymbols = (payload.topSymbols || []).slice(0, 12);
+  const evidenceFeed = (payload.evidenceFeed || []).slice(0, 8);
+  const discoveryRuns = payload.discoveryRuns || [];
+  const activeRun = discoveryRuns[0] || null;
+  const activeValidation = activeRun?.validation || {};
+  const activeConfig = activeRun?.run_config || {};
+  const failedCloseChecks = (activeValidation.checks || []).filter((item) => !item.passed);
+  const candidateValidation = new Map((activeValidation.candidate_results || []).map((item) => [item.ticker || item.name, item]));
+
+  return (
+    <section className="workspace-grid">
+      <div className="wide-panel serenity-hero">
+        <div className="hero-copy">
+          <span className="badge blue">Serenity Method · Bottleneck First</span>
+          <h2>从顶层需求拆到供应链瓶颈，再把候选标的转成可验证 thesis</h2>
+        </div>
+        <div className="metric-strip">
+          <Metric icon={Database} label="Archive 记录" value={summary.archiveRecords || 0} />
+          <Metric icon={FileSearch} label="Thesis cards" value={summary.thesisCards || 0} />
+          <Metric icon={ShieldCheck} label="高分候选" value={summary.highScoreCards || 0} />
+        </div>
+      </div>
+
+      <div className="content-panel span-3">
+        <PanelHeader icon={Search} title="线性方法论" meta={payload.generatedAt ? `${formatEventTime(payload.generatedAt)} 更新` : state === 'loading' ? '同步中' : '本地'} />
+        <div className="serenity-pipeline">
+          {(payload.methodology || []).map((step, index) => (
+            <article className="method-step" key={step.id || step.title}>
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <strong>{step.title}</strong>
+              <p>{step.prompt}</p>
+              <small>{step.output}</small>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      <div className="content-panel span-3">
+        <PanelHeader icon={Globe2} title="新市场 Discovery Runs" meta={`${discoveryRuns.length} runs · ${activeRun?.cadence || 'waiting'}`} />
+        {activeRun ? (
+          <div className="discovery-layout">
+            <article className="discovery-summary">
+              <div className="run-badge-row">
+                <span className="badge amber">{activeRun.status}</span>
+                <span className={`badge ${activeValidation.can_close ? 'green' : 'blue'}`}>
+                  {activeValidation.can_close ? 'Close gate passed' : 'Cannot close'}
+                </span>
+              </div>
+              <h3>{activeRun.title}</h3>
+              <p>{activeRun.objective}</p>
+              <strong>顶层需求</strong>
+              <p>{activeRun.topLevelDemand || '未记录'}</p>
+              <strong>当前答案</strong>
+              <p>{activeRun.currentAnswer}</p>
+              <small>
+                {activeConfig.run_id || activeRun.id} · {activeConfig.run_mode || 'legacy'} · Market data {formatDateShort(activeConfig.market_data_as_of)}
+              </small>
+              <div className="run-metric-row">
+                <span>Search {activeValidation.metrics?.search_rows || 0}</span>
+                <span>Core {activeValidation.metrics?.core_evidence_rows || 0}</span>
+                <span>Families {activeValidation.metrics?.independent_source_families || 0}</span>
+                <span>Red {activeValidation.metrics?.challenge_rows || 0}</span>
+              </div>
+            </article>
+            <div className="market-map-grid">
+              {(activeRun.markets || []).slice(0, 6).map((market) => (
+                <article className="market-map-card" key={market.market}>
+                  <div className="market-card-head">
+                    <strong>{market.market}</strong>
+                    <span>{market.coverageStatus || 'coverage_insufficient'}</span>
+                  </div>
+                  <p>{market.chokepoint}</p>
+                  <div className="serenity-chain mini">
+                    {(market.demandChain || []).slice(0, 5).map((item) => <span key={item}>{item}</span>)}
+                  </div>
+                  <small>{market.supplierCount} · {market.capacityExpansionLeadTime || '扩产周期未记录'}</small>
+                  {market.listedCarrierScreening && <small>上市载体筛选：{market.listedCarrierScreening}</small>}
+                </article>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="empty-state">
+            <Globe2 size={24} />
+            <strong>暂无 discovery run</strong>
+            <span>下一轮 research 会把搜索与推理过程写入这里。</span>
+          </div>
+        )}
+      </div>
+
+      {activeRun && (
+        <>
+          <div className="content-panel span-2">
+            <PanelHeader
+              icon={ShieldCheck}
+              title="V2 关闭门槛"
+              meta={`${(activeValidation.checks || []).length - failedCloseChecks.length}/${(activeValidation.checks || []).length} passed`}
+            />
+            <div className="validation-grid">
+              {(activeValidation.checks || []).map((item) => (
+                <article className={`validation-row ${item.passed ? 'passed' : 'failed'}`} key={item.id}>
+                  <span>{item.passed ? 'PASS' : 'OPEN'}</span>
+                  <div>
+                    <strong>{item.label}</strong>
+                    {item.detail && <small>{item.detail}</small>}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="content-panel">
+            <PanelHeader icon={Settings2} title="Research Run 配置" meta={`Protocol ${payload.protocol?.version || 'V2'}`} />
+            <div className="run-config-list">
+              <div><span>Run ID</span><strong>{activeConfig.run_id || activeRun.id}</strong></div>
+              <div><span>Mode</span><strong>{activeConfig.run_mode || '未记录'}</strong></div>
+              <div><span>Research date</span><strong>{formatDateShort(activeConfig.research_date)}</strong></div>
+              <div><span>Market data</span><strong>{formatDateShort(activeConfig.market_data_as_of)}</strong></div>
+              <div><span>Universe</span><strong>{activeConfig.investment_universe || '未记录'}</strong></div>
+              <div><span>Exchanges</span><strong>{(activeConfig.included_exchanges || []).join(', ') || '未记录'}</strong></div>
+              <div><span>Regions</span><strong>{(activeConfig.included_regions || []).join(', ') || '未记录'}</strong></div>
+              <div><span>Market cap</span><strong>{activeConfig.market_cap_min ?? 'open'} - {activeConfig.market_cap_max ?? 'open'}</strong></div>
+              <div><span>Minimum ADTV</span><strong>{activeConfig.minimum_average_daily_traded_value ?? '未记录'}</strong></div>
+              <div><span>Maximum analysts</span><strong>{activeConfig.maximum_analyst_coverage ?? '未记录'}</strong></div>
+              <div><span>Minimum exposure</span><strong>{activeConfig.minimum_revenue_exposure ?? '未记录'}</strong></div>
+              <div><span>Maximum suppliers</span><strong>{activeConfig.maximum_supplier_count_for_bottleneck ?? '未记录'}</strong></div>
+              <div><span>Expansion lead time</span><strong>{activeConfig.minimum_capacity_expansion_lead_time || '未记录'}</strong></div>
+              <div><span>Search budget</span><strong>{activeConfig.search_budget || 0}</strong></div>
+              <div><span>Source budget</span><strong>{activeConfig.source_budget || 0}</strong></div>
+              <div><span>Dashboard sync</span><strong>{activeRun.sync?.dashboard?.status || 'pending'}</strong></div>
+              <div><span>Obsidian sync</span><strong>{activeRun.sync?.obsidian?.status || 'pending'}</strong></div>
+            </div>
+            <p className="inline-note">{activeRun.sync?.obsidian?.note_path || payload.source?.obsidianDirectory || 'Obsidian note path 未生成'}</p>
+          </div>
+
+          <div className="content-panel span-2">
+            <PanelHeader icon={Search} title="搜索账本" meta={`${activeRun.searchLedger?.length || 0} 条`} />
+            <div className="ledger-list">
+              {(activeRun.searchLedger || []).map((row) => (
+                <article className="ledger-row" key={`${row.source}-${row.url}`}>
+                  <div>
+                    <strong>{row.source}</strong>
+                    <span>{row.sourceType} · {row.allowedUse || 'unclassified'} · {formatDateShort(row.checkedAt)}</span>
+                  </div>
+                  <p>{row.why}</p>
+                  <p>{row.finding}</p>
+                  <small>{row.impact}</small>
+                  {row.url && (
+                    <a href={row.url} target="_blank" rel="noreferrer">
+                      <ExternalLink size={13} />
+                      <span>Source</span>
+                    </a>
+                  )}
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="content-panel">
+            <PanelHeader icon={ShieldCheck} title="推理账本" meta={`${activeRun.reasoningLedger?.length || 0} steps`} />
+            <div className="reasoning-list">
+              {(activeRun.reasoningLedger || []).map((row) => (
+                <article className="reasoning-row" key={`${row.step}-${row.hypothesis}`}>
+                  <span>Step {row.step || '-'}</span>
+                  <strong>{row.hypothesis}</strong>
+                  <p>{row.inference}</p>
+                  <small>{row.claimStatus || 'unknown'} · {row.confidence} · Next: {row.nextUncertainty}</small>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="content-panel span-2">
+            <PanelHeader icon={Database} title="证据账本" meta={`${activeRun.evidenceLedger?.length || 0} evidence rows`} />
+            <div className="evidence-ledger-grid">
+              {(activeRun.evidenceLedger || []).map((row) => (
+                <article className="evidence-ledger-row" key={row.id || `${row.source}-${row.url}`}>
+                  <div>
+                    <span className={`badge ${row.allowedUse === 'core_evidence' ? 'green' : 'blue'}`}>{row.allowedUse}</span>
+                    <strong>{row.originalSource || row.source}</strong>
+                    <small>{row.sourceFamily || 'source family 未记录'} · {row.claimStatus || 'unknown'}</small>
+                  </div>
+                  <p>{row.finding}</p>
+                  <small>限制：{row.limitations || '未记录'}</small>
+                  {row.url && <a href={row.url} target="_blank" rel="noreferrer">Source</a>}
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="content-panel">
+            <PanelHeader icon={ShieldCheck} title="Challenge / Red Team" meta={`${activeRun.challengeLedger?.length || 0} rows`} />
+            <div className="challenge-summary-list">
+              {(activeRun.challengeLedger || []).map((row) => (
+                <article key={`${row.challenge}-${row.query}`}>
+                  <strong>{row.challenge}</strong>
+                  <p>{row.result}</p>
+                  <small>{row.impact} · {row.nextAction}</small>
+                </article>
+              ))}
+            </div>
+            <div className="unknown-list">
+              <strong>未知项与数据缺口</strong>
+              <ul>{(activeRun.unknowns || []).map((item) => <li key={item}>{item}</li>)}</ul>
+            </div>
+          </div>
+
+          <div className="content-panel span-2">
+            <PanelHeader icon={BarChart3} title="候选标的与淘汰项" meta={`${activeRun.candidates?.length || 0} candidates`} />
+            <div className="candidate-grid">
+              {(activeRun.candidates || []).map((candidate) => (
+                <article className="candidate-card" key={`${candidate.ticker}-${candidate.name}`}>
+                  <div className="thesis-card-head">
+                    <div>
+                      <div className="run-badge-row">
+                        <span className="badge blue">{candidate.market}</span>
+                        <span className="badge amber">{candidate.status || 'screening'}</span>
+                      </div>
+                      <h3>{candidate.ticker ? formatTicker(candidate.ticker) : candidate.name}</h3>
+                      <p>{candidate.publicExposure}</p>
+                    </div>
+                    <span className={scoreClass(candidate.score)}>{candidate.score}</span>
+                  </div>
+                  <strong>为什么暂时保留</strong>
+                  <p>{candidate.whySurvives}</p>
+                  <strong>关键反证</strong>
+                  <p>{candidate.keyFalsifier}</p>
+                  <small>
+                    Fatal Gate: {candidateValidation.get(candidate.ticker || candidate.name)?.fatal_gate_passed ? 'pass' : 'open'} · Score fields: {candidateValidation.get(candidate.ticker || candidate.name)?.score_fields_complete ? 'complete' : 'open'} · {candidate.nextEvidence}
+                  </small>
+                </article>
+              ))}
+              {(activeRun.rejected || []).map((item) => (
+                <article className="candidate-card rejected" key={item.target}>
+                  <span className="badge amber">Rejected</span>
+                  <h3>{item.target}</h3>
+                  <p>{item.reason}</p>
+                  <small>{item.recheckTrigger}</small>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="content-panel">
+            <PanelHeader icon={Clock3} title="下一轮 24-72h research" meta={`${activeRun.nextQueue?.length || 0} tasks`} />
+            <div className="next-queue">
+              {(activeRun.nextQueue || []).map((item) => (
+                <article className="next-task" key={item.task}>
+                  <span>Priority {item.priority}</span>
+                  <strong>{item.task}</strong>
+                  <p>{item.sourceToInspect}</p>
+                  <small>反证：{item.falsifier}</small>
+                </article>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="content-panel">
+        <PanelHeader icon={SlidersHorizontal} title="研究焦点" meta={`${focusOptions.length} 条线`} />
+        <div className="source-filter-row compact-filter">
+          <button className={selectedFocus === 'all' ? 'selected' : ''} onClick={() => setSelectedFocus('all')}>全部</button>
+          {focusOptions.map((area) => (
+            <button
+              key={area.title}
+              className={selectedFocus === area.title ? 'selected' : ''}
+              onClick={() => setSelectedFocus(area.title)}
+            >
+              {area.title}
+            </button>
+          ))}
+        </div>
+        <div className="focus-list">
+          {focusOptions.map((area) => (
+            <article className="focus-row" key={area.id || area.title}>
+              <div>
+                <strong>{area.title}</strong>
+                <span>{area.why}</span>
+              </div>
+              <small>{area.cardCount || 0} cards</small>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      <div className="content-panel span-2">
+        <PanelHeader icon={FileSearch} title="Serenity thesis cards" meta={`${visibleCards.length}/${cards.length} 个`} />
+        <div className="thesis-grid">
+          {visibleCards.length ? (
+            visibleCards.map((card) => (
+              <article className="thesis-card" key={card.id}>
+                <div className="thesis-card-head">
+                  <div>
+                    <span className="badge green">{card.focusArea}</span>
+                    <h3>{card.title}</h3>
+                    <div className="tag-list">
+                      <span>{formatTicker(card.primaryTicker)}</span>
+                      <span>{card.layer}</span>
+                      <span>{card.status}</span>
+                    </div>
+                  </div>
+                  <span className={scoreClass(card.score)}>{card.score}</span>
+                </div>
+
+                <div className="serenity-chain">
+                  {(card.chain || []).slice(0, 6).map((item) => <span key={item}>{item}</span>)}
+                </div>
+
+                <div className="thesis-columns">
+                  <div>
+                    <strong>需求源</strong>
+                    <p>{card.demandSource || '待补充'}</p>
+                  </div>
+                  <div>
+                    <strong>瓶颈</strong>
+                    <p>{card.chokepoint || '待补充'}</p>
+                  </div>
+                  <div>
+                    <strong>财务转译</strong>
+                    <p>{card.financialTranslation || '待补充'}</p>
+                  </div>
+                  <div>
+                    <strong>市场误分类</strong>
+                    <p>{card.marketMisclassification || '待补充'}</p>
+                  </div>
+                </div>
+
+                <div className="thesis-checks">
+                  <div>
+                    <strong>验证信号</strong>
+                    <ul>{(card.validationSignals || []).slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul>
+                  </div>
+                  <div>
+                    <strong>反证条件</strong>
+                    <ul>{(card.falsifiers || []).slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul>
+                  </div>
+                </div>
+
+                <div className="evidence-strip">
+                  <span>{card.stats?.postCount || 0} archive hits</span>
+                  <span>{card.stats?.engagement || 0} engagement</span>
+                  <span>{card.stats?.lastSeen ? formatDateShort(card.stats.lastSeen) : '未命中'}</span>
+                </div>
+
+                <div className="evidence-stack">
+                  {(card.evidence || []).slice(0, 3).map((item) => (
+                    <a href={item.url} target="_blank" rel="noreferrer" key={item.id || item.url || item.text}>
+                      <span>{formatDateShort(item.date)} · {joinCompact((item.tickers || []).map(formatTicker), '无 ticker')}</span>
+                      <p>{item.text}</p>
+                    </a>
+                  ))}
+                </div>
+
+                <button className="primary-action compact" onClick={() => addToResearchQueue(card)} disabled={activeCardId === card.id}>
+                  <ListChecks size={18} />
+                  <span>{activeCardId === card.id ? '加入中' : '加入研究队列'}</span>
+                </button>
+              </article>
+            ))
+          ) : (
+            <div className="empty-state">
+              <FileSearch size={24} />
+              <strong>{state === 'loading' ? '正在读取 Serenity archive' : '暂无候选卡'}</strong>
+              <span>{state === 'error' ? message : '切换焦点或创建新的候选卡。'}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="content-panel">
+        <PanelHeader icon={Rocket} title="候选卡构建器" meta="线性 thesis" />
+        <label className="field">
+          <span>标题</span>
+          <input value={builder.title} onChange={(event) => updateBuilder('title', event.target.value)} placeholder="例如：某材料商卡住 CPO 上游产能" />
+        </label>
+        <div className="form-grid">
+          <label className="field">
+            <span>主标的</span>
+            <input value={builder.primaryTicker} onChange={(event) => updateBuilder('primaryTicker', event.target.value)} placeholder="SIVE" />
+          </label>
+          <label className="field">
+            <span>相关标的</span>
+            <input value={builder.tickers} onChange={(event) => updateBuilder('tickers', event.target.value)} placeholder="SIVE, LITE, COHR" />
+          </label>
+        </div>
+        <label className="field">
+          <span>焦点线</span>
+          <input value={builder.focusArea} onChange={(event) => updateBuilder('focusArea', event.target.value)} />
+        </label>
+        <label className="field">
+          <span>层级</span>
+          <input value={builder.layer} onChange={(event) => updateBuilder('layer', event.target.value)} />
+        </label>
+        <label className="field">
+          <span>顶层需求</span>
+          <textarea value={builder.demandSource} onChange={(event) => updateBuilder('demandSource', event.target.value)} rows={3} />
+        </label>
+        <label className="field">
+          <span>依赖链</span>
+          <input value={builder.chain} onChange={(event) => updateBuilder('chain', event.target.value)} placeholder="AI capex, GPU, 光互联, 材料" />
+        </label>
+        <label className="field">
+          <span>瓶颈</span>
+          <textarea value={builder.chokepoint} onChange={(event) => updateBuilder('chokepoint', event.target.value)} rows={3} />
+        </label>
+        <label className="field">
+          <span>上市载体</span>
+          <textarea value={builder.businessCarrier} onChange={(event) => updateBuilder('businessCarrier', event.target.value)} rows={2} />
+        </label>
+        <label className="field">
+          <span>财务转译</span>
+          <textarea value={builder.financialTranslation} onChange={(event) => updateBuilder('financialTranslation', event.target.value)} rows={2} />
+        </label>
+        <label className="field">
+          <span>市场误分类</span>
+          <textarea value={builder.marketMisclassification} onChange={(event) => updateBuilder('marketMisclassification', event.target.value)} rows={2} />
+        </label>
+        <label className="field">
+          <span>验证信号</span>
+          <textarea value={builder.validationSignals} onChange={(event) => updateBuilder('validationSignals', event.target.value)} rows={2} placeholder="每行或逗号分隔" />
+        </label>
+        <label className="field">
+          <span>反证条件</span>
+          <textarea value={builder.falsifiers} onChange={(event) => updateBuilder('falsifiers', event.target.value)} rows={2} />
+        </label>
+        <label className="field">
+          <span>证据关键词</span>
+          <input value={builder.keywords} onChange={(event) => updateBuilder('keywords', event.target.value)} placeholder="CPO, InP, customer qualification" />
+        </label>
+        <button className="primary-action" onClick={createCustomCard}>
+          <Check size={18} />
+          <span>保存候选卡</span>
+        </button>
+        {message && <div className="inline-note">{message}</div>}
+      </div>
+
+      <div className="content-panel">
+        <PanelHeader icon={BarChart3} title="高频标的" meta={`${topSymbols.length} 个`} />
+        <div className="symbol-table">
+          {topSymbols.map((item) => (
+            <div className="symbol-row" key={item.symbol}>
+              <strong>{formatTicker(item.symbol)}</strong>
+              <span>{item.count} posts</span>
+              <span>{item.engagement} eng</span>
+              <small>{item.lastSeen ? formatDateShort(item.lastSeen) : '未知'}</small>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="content-panel span-2">
+        <PanelHeader icon={Database} title="Archive 证据片段" meta={payload.source?.archiveExists ? '本地 JSON 已连接' : 'archive 未找到'} />
+        <div className="archive-feed">
+          {evidenceFeed.map((item) => (
+            <a href={item.url} target="_blank" rel="noreferrer" key={item.id || item.url}>
+              <div>
+                <strong>{joinCompact((item.tickers || []).map(formatTicker), '无 ticker')}</strong>
+                <span>{formatDateShort(item.date)} · {item.engagement} engagement</span>
+              </div>
+              <p>{item.text}</p>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AiStockRadar() {
+  const [serenityData, setSerenityData] = useState({ discoveryRuns: [], focusAreas: [], thesisCards: [] });
+  const [researchRuns, setResearchRuns] = useState([]);
+  const [selectedTicker, setSelectedTicker] = useState('NVDA');
+  const [selectedSector, setSelectedSector] = useState('AI Application');
+  const [message, setMessage] = useState('');
+
+  const loadRadarContext = async () => {
+    try {
+      const [data, researchPayload] = await Promise.all([
+        apiFetch('/api/serenity/research-system'),
+        apiFetch('/api/ai-radar/research-runs'),
+      ]);
+      setSerenityData({
+        discoveryRuns: Array.isArray(data.discoveryRuns) ? data.discoveryRuns : [],
+        focusAreas: Array.isArray(data.focusAreas) ? data.focusAreas : [],
+        thesisCards: Array.isArray(data.thesisCards) ? data.thesisCards : [],
+      });
+      setResearchRuns(Array.isArray(researchPayload.runs) ? researchPayload.runs : []);
+    } catch (error) {
+      setMessage('Serenity research context 暂不可用；看板仍可查看 benchmark 缺口。');
+    }
+  };
+
+  useEffect(() => {
+    loadRadarContext();
+    const timer = window.setInterval(loadRadarContext, 10000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const selectedStock = radarCoreStocks.find((stock) => stock.ticker === selectedTicker) || radarCoreStocks[0];
+  const selectedSectorData = radarSubsectors.find((sector) => sector.name === selectedSector) || radarSubsectors.find((sector) => sector.coverage === 'missing');
+  const missingSectors = radarSubsectors.filter((sector) => sector.coverage === 'missing');
+  const partialSectors = radarSubsectors.filter((sector) => sector.coverage === 'partial');
+  const activeMarkets = (serenityData.discoveryRuns || []).flatMap((run) => run.markets || []);
+  const activeResearchRun = researchRuns[0] || null;
+  const activeCloseCriteria = activeResearchRun?.minimumCloseCriteria || {};
+  const activeNextActions = activeResearchRun
+    ? [
+        ...(activeResearchRun.openQuestions || []).slice(0, 3),
+        ...(activeResearchRun.sourceLedger || []).map((item) => item.nextAction).filter(Boolean).slice(0, 2),
+      ].slice(0, 5)
+    : [];
+  const coverageCounts = {
+    covered: radarSubsectors.filter((sector) => sector.coverage === 'covered').length,
+    partial: partialSectors.length,
+    missing: missingSectors.length,
+  };
+
+  const addGapToQueue = async (sector) => {
+    setMessage(`正在把 ${sector.name} 加入研究队列`);
+    try {
+      await apiFetch('/api/research/queue', {
+        method: 'POST',
+        body: JSON.stringify({
+          question: `${sector.name}：是否存在 Serenity 式深层瓶颈和小市值/低覆盖 public carrier？`,
+          tickers: sector.tickers,
+          themes: [sector.name, 'AI Stock Radar gap', 'Serenity market discovery'],
+          priority: sector.coverage === 'missing' ? 2 : 3,
+        }),
+      });
+      setMessage(`${sector.name} 已加入研究队列`);
+    } catch (error) {
+      setMessage('加入研究队列失败');
+    }
+  };
+
+  return (
+    <section className="radar-shell">
+      <div className="radar-left">
+        <header className="radar-hero">
+          <div>
+            <span className="radar-eyebrow">AI Stock Radar · Benchmark View</span>
+            <h2>AI Universe 覆盖雷达</h2>
+            <p>结构参考截图看板；当前不接实时行情，重点用于发现我们的 research 覆盖缺口。</p>
+          </div>
+          <button className="radar-refresh" onClick={loadRadarContext}>
+            <RefreshCcw size={15} />
+            <span>刷新</span>
+          </button>
+        </header>
+
+        <div className="radar-stat-grid">
+          {radarStats.map(([label, value, note]) => (
+            <div className="radar-stat" key={label}>
+              <span>{label}</span>
+              <strong>{value}</strong>
+              <small>{note}</small>
+            </div>
+          ))}
+        </div>
+
+        {activeResearchRun && (
+          <section className="radar-panel active-output-panel">
+            <div className="radar-panel-head">
+              <div>
+                <strong>Active Research Output</strong>
+                <span>当前研究状态的结果层；结论、不能关闭原因和下一步会实时透出</span>
+              </div>
+              <small>{activeResearchRun.closeState}</small>
+            </div>
+            <div className="active-output-grid">
+              <article className="active-output-main">
+                <span className="radar-eyebrow">{activeResearchRun.status} · {activeResearchRun.confidence}</span>
+                <h3>{activeResearchRun.title}</h3>
+                <p>{activeResearchRun.currentConclusion}</p>
+              </article>
+              <article className="active-output-card">
+                <strong>为什么不能关闭</strong>
+                <p>{activeCloseCriteria.reason || 'Close gate 尚未满足。'}</p>
+                <div className="active-evidence-row">
+                  <span>Search {activeCloseCriteria.searchRows || 0}</span>
+                  <span>Core {activeCloseCriteria.coreEvidenceRows || 0}</span>
+                  <span>Red {activeCloseCriteria.redTeamRows || 0}</span>
+                  <span>{activeCloseCriteria.canClose ? 'Can close' : 'Cannot close'}</span>
+                </div>
+              </article>
+              <article className="active-output-card">
+                <strong>过程结论</strong>
+                <ul>
+                  {(activeResearchRun.processConclusions || []).slice(0, 4).map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              </article>
+              <article className="active-output-card">
+                <strong>下一步</strong>
+                <ul>
+                  {activeNextActions.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              </article>
+            </div>
+          </section>
+        )}
+
+        <section className="radar-panel live-run-panel">
+          <div className="radar-panel-head">
+            <div>
+              <strong>Live Research Run</strong>
+              <span>实时同步 research 步骤、搜索源、挑战结果和过程结论；每 10 秒轮询一次</span>
+            </div>
+            <small>{activeResearchRun?.closeState || 'waiting'}</small>
+          </div>
+          {activeResearchRun ? (
+            <div className="live-run-layout">
+              <article className="live-run-summary">
+                <span className="radar-eyebrow">{activeResearchRun.status} · {activeResearchRun.confidence}</span>
+                <h3>{activeResearchRun.title}</h3>
+                <p>{activeResearchRun.objective}</p>
+                <strong>当前过程结论</strong>
+                <p>{activeResearchRun.currentConclusion}</p>
+                <div className="close-criteria-grid">
+                  <div><span>Search</span><strong>{activeResearchRun.minimumCloseCriteria?.searchRows || 0}</strong></div>
+                  <div><span>Core</span><strong>{activeResearchRun.minimumCloseCriteria?.coreEvidenceRows || 0}</strong></div>
+                  <div><span>Red team</span><strong>{activeResearchRun.minimumCloseCriteria?.redTeamRows || 0}</strong></div>
+                  <div><span>Can close</span><strong>{activeResearchRun.minimumCloseCriteria?.canClose ? 'Yes' : 'No'}</strong></div>
+                </div>
+              </article>
+
+              <div className="research-step-list">
+                {(activeResearchRun.steps || []).map((step) => (
+                  <article className={`research-step ${step.status}`} key={`${step.time}-${step.title}`}>
+                    <div>
+                      <strong>{step.title}</strong>
+                      <span>{step.type} · {formatDateShort(step.time)} · {step.status}</span>
+                    </div>
+                    <p>{step.detail}</p>
+                    <small>{step.conclusion}</small>
+                  </article>
+                ))}
+              </div>
+
+              <div className="source-ledger-live">
+                {(activeResearchRun.sourceLedger || []).map((source) => (
+                  <article className="source-live-row" key={`${source.source}-${source.allowedUse}`}>
+                    <div>
+                      <strong>{source.source}</strong>
+                      <span>{source.sourceType} · {source.allowedUse} · {source.convictionImpact}</span>
+                    </div>
+                    <p>{source.finding}</p>
+                    <small>{source.nextAction}</small>
+                    {source.url && <a href={source.url} target="_blank" rel="noreferrer">source</a>}
+                  </article>
+                ))}
+              </div>
+
+              <div className="challenge-live-list">
+                {(activeResearchRun.challengeLedger || []).map((row) => (
+                  <article className="challenge-live-row" key={row.challenge}>
+                    <strong>{row.challenge}</strong>
+                    <p>{row.result}</p>
+                    <small>{row.impact} · {row.nextAction}</small>
+                  </article>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <Radio size={24} />
+              <strong>等待 research run</strong>
+              <span>后端没有返回 live run。</span>
+            </div>
+          )}
+        </section>
+
+        <section className="radar-panel">
+          <div className="radar-panel-head">
+            <div>
+              <strong>信息源审计</strong>
+              <span>截图看板隐含的源：行情、基本面、新闻、分析师、产业分类；这里按用途和信噪比重新分层</span>
+            </div>
+            <small>{radarSourceStack.length} source layers</small>
+          </div>
+          <div className="source-audit-grid">
+            {radarSourceStack.map((source) => (
+              <article className={`source-audit-card ${source.currentStatus}`} key={source.layer}>
+                <div>
+                  <strong>{source.layer}</strong>
+                  <span>{coverageLabel(source.currentStatus)}</span>
+                </div>
+                <p>{source.filterRule}</p>
+                <small>截图维度：{joinCompact(source.screenshotSignals.slice(0, 4))}</small>
+                <small>建议源：{joinCompact(source.preferredSources.slice(0, 3))}</small>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="radar-panel">
+          <div className="radar-panel-head">
+            <div>
+              <strong>分析维度审计</strong>
+              <span>不是看少了几个领域，而是缺了行情、基本面、估值、新闻、AI exposure 和筛选器维度</span>
+            </div>
+            <small>{radarDimensionAudit.length} dimension groups</small>
+          </div>
+          <div className="dimension-audit-list">
+            {radarDimensionAudit.map((item) => (
+              <article className={`dimension-audit-row ${item.ourStatus}`} key={item.group}>
+                <div>
+                  <strong>{item.group}</strong>
+                  <span>{coverageLabel(item.ourStatus)}</span>
+                </div>
+                <p>{joinCompact(item.screenshotDimensions)}</p>
+                <small>{item.action}</small>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="radar-panel">
+          <div className="radar-panel-head">
+            <div>
+              <strong>Challenge Gate</strong>
+              <span>防止 research 过早结束；每个候选必须先被反方挑战和最低证据门槛卡住</span>
+            </div>
+            <small>{challengeGateRules.length} gates</small>
+          </div>
+          <div className="challenge-gate-grid">
+            {challengeGateRules.map((item) => (
+              <article className="challenge-gate-card" key={item.name}>
+                <div>
+                  <strong>{item.name}</strong>
+                  <span>{item.status}</span>
+                </div>
+                <p>{item.rule}</p>
+                <small>{item.failAction}</small>
+              </article>
+            ))}
+          </div>
+          <div className="counter-query-strip">
+            {challengeQueries.map((query) => <span key={query}>{query}</span>)}
+          </div>
+        </section>
+
+        <section className="radar-panel">
+          <div className="radar-panel-head">
+            <div>
+              <strong>异常脉动</strong>
+              <span>截图 benchmark 中出现但我们未必覆盖的异动线索</span>
+            </div>
+            <small>{radarAnomalies.length} signals</small>
+          </div>
+          <div className="anomaly-grid">
+            {radarAnomalies.map((item) => (
+              <button className={`anomaly-row ${item.coverage}`} key={item.ticker} onClick={() => setSelectedSector(item.theme)}>
+                <strong>{item.ticker}</strong>
+                <span>{item.theme}</span>
+                <b>{item.move}</b>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="radar-panel">
+          <div className="radar-panel-head">
+            <div>
+              <strong>Core Research 30</strong>
+              <span>大盘 anchor + 研究基准；深层瓶颈仍要从它们向下拆</span>
+            </div>
+            <small>30 tickers</small>
+          </div>
+          <div className="core-card-grid">
+            {radarCoreStocks.map((stock) => (
+              <button
+                className={`core-stock-card ${selectedTicker === stock.ticker ? 'selected' : ''}`}
+                key={stock.ticker}
+                onClick={() => {
+                  setSelectedTicker(stock.ticker);
+                  setSelectedSector(stock.sector);
+                }}
+              >
+                <div>
+                  <strong>{stock.ticker}</strong>
+                  <span>{stock.name}</span>
+                </div>
+                <b>{stock.price}</b>
+                <small className={stock.move.startsWith('-') ? 'down' : 'up'}>{stock.move}</small>
+                <em>{stock.sector}</em>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="radar-panel">
+          <div className="radar-panel-head">
+            <div>
+              <strong>AI 子板块热力图</strong>
+              <span>绿色=我们已覆盖；黄色=部分覆盖；红色=相对截图看板遗漏</span>
+            </div>
+            <small>{coverageCounts.covered}/{coverageCounts.partial}/{coverageCounts.missing}</small>
+          </div>
+          <div className="sector-heatmap">
+            {radarSubsectors.map((sector) => (
+              <button
+                className={`sector-tile ${sector.coverage} ${selectedSector === sector.name ? 'selected' : ''}`}
+                key={sector.name}
+                onClick={() => setSelectedSector(sector.name)}
+              >
+                <strong>{sector.name}</strong>
+                <b>{sector.move}</b>
+                <span>{coverageLabel(sector.coverage)}</span>
+                <small>{joinCompact(sector.tickers.slice(0, 4))}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="radar-panel">
+          <div className="radar-panel-head">
+            <div>
+              <strong>Coverage Gap vs 当前搜集</strong>
+              <span>从截图看板倒推出我们缺失的研究域</span>
+            </div>
+            <small>{missingSectors.length} hard gaps</small>
+          </div>
+          <div className="gap-table">
+            {[...missingSectors, ...partialSectors].map((sector) => (
+              <article className={`gap-row ${sector.coverage}`} key={sector.name}>
+                <div>
+                  <strong>{sector.name}</strong>
+                  <span>{coverageLabel(sector.coverage)} · {joinCompact(sector.tickers)}</span>
+                </div>
+                <p>{sector.gap}</p>
+                <button className="radar-action" onClick={() => addGapToQueue(sector)}>
+                  <ListChecks size={14} />
+                  <span>加入队列</span>
+                </button>
+              </article>
+            ))}
+          </div>
+          {message && <div className="radar-note">{message}</div>}
+        </section>
+      </div>
+
+      <aside className="radar-detail">
+        {activeResearchRun && (
+          <div className="detail-card">
+            <span className="radar-eyebrow">Live Conclusions</span>
+            <div className="filter-policy-list">
+              {(activeResearchRun.processConclusions || []).slice(0, 5).map((item) => (
+                <article key={item}>
+                  <strong>Process</strong>
+                  <span>{item}</span>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeResearchRun && (
+          <div className="detail-card">
+            <span className="radar-eyebrow">Open Questions</span>
+            <div className="filter-policy-list">
+              {(activeResearchRun.openQuestions || []).slice(0, 5).map((item) => (
+                <article key={item}>
+                  <strong>Next</strong>
+                  <span>{item}</span>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="detail-card">
+          <span className="radar-eyebrow">个股详情</span>
+          <div className="detail-title">
+            <div>
+              <h3>{selectedStock.ticker}</h3>
+              <span>{selectedStock.name}</span>
+            </div>
+            <b className={selectedStock.move.startsWith('-') ? 'down' : 'up'}>{selectedStock.move}</b>
+          </div>
+          <p>{selectedStock.thesis}</p>
+          <div className="detail-metrics">
+            <div><span>价格样本</span><strong>{selectedStock.price}</strong></div>
+            <div><span>AI Exposure</span><strong>{selectedStock.score}</strong></div>
+            <div><span>分类</span><strong>{selectedStock.sector}</strong></div>
+            <div><span>角色</span><strong>{selectedStock.ticker === 'NVDA' ? '需求锚' : '对照/载体'}</strong></div>
+          </div>
+        </div>
+
+        <div className="detail-card">
+          <span className="radar-eyebrow">选中板块</span>
+          <h3>{selectedSectorData?.name}</h3>
+          <div className={`coverage-pill ${selectedSectorData?.coverage}`}>{coverageLabel(selectedSectorData?.coverage)}</div>
+          <p>{selectedSectorData?.gap}</p>
+          <div className="detail-tags">
+            {(selectedSectorData?.tickers || []).map((ticker) => <span key={ticker}>{ticker}</span>)}
+          </div>
+          {selectedSectorData && (
+            <button className="radar-action wide" onClick={() => addGapToQueue(selectedSectorData)}>
+              <ListChecks size={14} />
+              <span>转入研究队列</span>
+            </button>
+          )}
+        </div>
+
+        <div className="detail-card">
+          <span className="radar-eyebrow">我们当前已搜集</span>
+          <div className="collected-list">
+            {(activeMarkets.length ? activeMarkets : serenityData.focusAreas).slice(0, 8).map((item) => (
+              <article key={item.market || item.title}>
+                <strong>{item.market || item.title}</strong>
+                <span>{item.status || item.why || 'active research'}</span>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div className="detail-card">
+          <span className="radar-eyebrow">Source Filter Policy</span>
+          <div className="filter-policy-list">
+            <article>
+              <strong>事实层</strong>
+              <span>SEC / company IR / official technical docs / standards / government reports，可进入 thesis 核心。</span>
+            </article>
+            <article>
+              <strong>数据层</strong>
+              <span>Polygon/FMP/Finnhub 等只做行情、财务缓存、预期数据，关键数字必须回到 filing 或 IR。</span>
+            </article>
+            <article>
+              <strong>发现层</strong>
+              <span>Yahoo/FMP news/X/Reddit/GitHub 只能触发 research task，不能直接提高 conviction。</span>
+            </article>
+            <article>
+              <strong>剔除/降权</strong>
+              <span>Motley Fool、二手新闻、无原文链接聚合、重复转载，不进入核心证据链。</span>
+            </article>
+          </div>
+        </div>
+
+        <div className="detail-card">
+          <span className="radar-eyebrow">Close Rule</span>
+          <div className="filter-policy-list">
+            <article>
+              <strong>V2 State Machine</strong>
+              <span>Research Run 只能关闭为 closed_no_candidate 或 closed_candidate_found。</span>
+            </article>
+            <article>
+              <strong>Upgrade Gate</strong>
+              <span>没有 Fatal Gate、Challenge Gate、财务路径和具体反证，不允许升级为 high_conviction_candidate。</span>
+            </article>
+            <article>
+              <strong>Close Gate</strong>
+              <span>关闭前必须完成证据独立性、coverage_sufficient、定价分析、Red Team、看板与 Obsidian 同步。</span>
+            </article>
+          </div>
+        </div>
+
+        <div className="detail-card">
+          <span className="radar-eyebrow">结论</span>
+          <p>相比截图看板，真正缺的不是领域，而是行情/技术指标、基本面/估值、分析师预期、事件新闻、筛选器和横向 AI exposure score。领域缺口可以后补，源和维度要先定过滤规则。</p>
+        </div>
+      </aside>
+    </section>
+  );
+}
+
+function OfficialHoldings() {
+  const [holdingsData, setHoldingsData] = useState({
+    summary: {},
+    officials: [],
+    latestTransactions: [],
+    tickerExposure: [],
+    trump: { latestTransactions: [], tickerExposure: [], official: null },
+    sources: [],
+    notableEvents: [],
+  });
+  const [state, setState] = useState('loading');
+  const [message, setMessage] = useState('');
+
+  const loadHoldings = async ({ refresh = false } = {}) => {
+    setState('loading');
+    setMessage('');
+    try {
+      const data = await apiFetch(`/api/official-holdings${refresh ? '?refresh=1' : ''}`);
+      setHoldingsData({
+        ...data,
+        officials: Array.isArray(data.officials) ? data.officials : [],
+        latestTransactions: Array.isArray(data.latestTransactions) ? data.latestTransactions : [],
+        tickerExposure: Array.isArray(data.tickerExposure) ? data.tickerExposure : [],
+        sources: Array.isArray(data.sources) ? data.sources : [],
+        notableEvents: Array.isArray(data.notableEvents) ? data.notableEvents : [],
+        trump: data.trump || { latestTransactions: [], tickerExposure: [], official: null },
+      });
+      setState('ready');
+    } catch (error) {
+      setState('error');
+      setMessage('官员持仓数据暂不可用，请稍后刷新。');
+    }
+  };
+
+  useEffect(() => {
+    loadHoldings();
+  }, []);
+
+  const addToResearchQueue = async (event) => {
+    setMessage('正在加入研究队列');
+    try {
+      await apiFetch('/api/research/queue', {
+        method: 'POST',
+        body: JSON.stringify({ event }),
+      });
+      setMessage('已加入研究队列');
+    } catch (error) {
+      setMessage('加入研究队列失败');
+    }
+  };
+
+  const summary = holdingsData.summary || {};
+  const trumpExposure = holdingsData.trump?.tickerExposure || [];
+  const trumpTransactions = holdingsData.trump?.latestTransactions || [];
+  const trumpDocuments = holdingsData.trump?.official?.sourceDocuments || [];
+  const sources = holdingsData.sources || [];
+
+  return (
+    <section className="workspace-grid">
+      <div className="wide-panel holdings-hero">
+        <div className="hero-copy">
+          <span className="badge amber">Political Disclosure Branch</span>
+          <h2>追踪特朗普与美国行政分支官员的公开持仓、交易披露和潜在市场信号</h2>
+        </div>
+        <div className="metric-strip">
+          <Metric icon={UsersRound} label="追踪官员" value={summary.officialCount || 0} />
+          <Metric icon={ClipboardList} label="披露交易" value={summary.transactionCount || 0} />
+          <Metric icon={BarChart3} label="估算中值" value={formatMoney(summary.estimatedMidpoint)} />
+        </div>
+      </div>
+
+      <div className="content-panel span-2">
+        <PanelHeader icon={Landmark} title="特朗普 / 官员披露事件" meta={holdingsData.exportedAt ? `数据 ${formatDateShort(holdingsData.exportedAt)}` : '等待数据'} />
+        <div className="briefing-tools">
+          <span className={`data-state ${state}`}>{state === 'loading' ? '同步中' : state === 'error' ? message : holdingsData.cached ? '已使用缓存' : '已同步公开数据'}</span>
+          <div className="toolbar-actions">
+            <button className="small-button" onClick={() => loadHoldings({ refresh: true })} disabled={state === 'loading'}>
+              <RefreshCcw size={14} />
+              <span>刷新</span>
+            </button>
+          </div>
+        </div>
+        {message && state !== 'error' && <div className="inline-note">{message}</div>}
+
+        <div className="holdings-split">
+          <div className="holdings-block">
+            <strong>Trump 最新披露</strong>
+            <div className="transaction-list compact">
+              {trumpTransactions.slice(0, 10).map((transaction) => (
+                <div className="transaction-row" key={transaction.id}>
+                  <div>
+                    <strong>{transaction.ticker || transaction.description}</strong>
+                    <span>
+                      {transaction.type} · {transaction.amount} · {formatDateShort(transaction.date)}
+                      {transaction.verificationChain?.sourceDocuments?.[0]?.url ? (
+                        <>
+                          {' · '}
+                          <a href={transaction.verificationChain.sourceDocuments[0].url} target="_blank" rel="noreferrer">OGE PDF</a>
+                        </>
+                      ) : ''}
+                    </span>
+                  </div>
+                  {transaction.lateFilingFlag && <span className="verify-pill warning">Late</span>}
+                </div>
+              ))}
+              {!trumpTransactions.length && (
+                <div className="empty-compact">
+                  <strong>暂无 Trump 交易</strong>
+                  <span>等待 Open Cabinet / OGE 数据返回。</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="holdings-block">
+            <strong>高价值/异常事件</strong>
+            <div className="event-list compact">
+              {(holdingsData.notableEvents || []).slice(0, 8).map((event) => (
+                <article className="mini-event" key={event.id}>
+                  <div>
+                    <strong>{event.title}</strong>
+                    <span>{joinCompact(event.tickers)} · {event.summary}</span>
+                  </div>
+                  <button className="small-button" onClick={() => addToResearchQueue(event)}>
+                    <ListChecks size={14} />
+                    <span>研究</span>
+                  </button>
+                </article>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="content-panel">
+        <PanelHeader icon={Database} title="信息源" meta={`${sources.length} 个`} />
+        <div className="registry-list">
+          {sources.map((source) => (
+            <div className="registry-row" key={source.id}>
+              <div>
+                <strong>{source.name}</strong>
+                <span>{formatTrustTier(source.trustTier)} · {source.captureMethod}</span>
+              </div>
+              {source.url && (
+                <a href={source.url} target="_blank" rel="noreferrer" title="打开源">
+                  <ExternalLink size={15} />
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="source-health">
+          <div>
+            <strong>OGE 原始文件</strong>
+            <span>{trumpDocuments.length} 份可验证</span>
+          </div>
+          {trumpDocuments.slice(0, 3).map((document) => (
+            <p key={document.id}>
+              <span>{document.form || 'OGE'}</span>
+              <small>
+                <a href={document.url} target="_blank" rel="noreferrer">{document.fileName}</a>
+              </small>
+            </p>
+          ))}
+          <p>
+            <span>验证边界</span>
+            <small>聚合源用于发现，重大结论必须回到 OGE 原始披露文件。</small>
+          </p>
+        </div>
+      </div>
+
+      <div className="content-panel">
+        <PanelHeader icon={BarChart3} title="Trump 标的暴露" meta={`${trumpExposure.length} 个 ticker`} />
+        <div className="exposure-list">
+          {trumpExposure.slice(0, 12).map((row) => (
+            <div className="exposure-row" key={row.ticker}>
+              <div>
+                <strong>{row.ticker}</strong>
+                <span>{row.transactions} 笔 · 买 {row.purchases} / 卖 {row.sales}</span>
+              </div>
+              <b>{formatMoney(row.estimatedMidpoint)}</b>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="content-panel span-2">
+        <PanelHeader icon={Globe2} title="全体官员热门标的" meta={`${holdingsData.tickerExposure?.length || 0} 个`} />
+        <div className="ticker-table">
+          {(holdingsData.tickerExposure || []).slice(0, 18).map((row) => (
+            <div className="ticker-row" key={row.ticker}>
+              <strong>{row.ticker}</strong>
+              <span>{row.company}</span>
+              <span>{row.officials?.slice(0, 2).join('、') || '未知官员'}</span>
+              <b>{formatMoney(row.estimatedMidpoint)}</b>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="content-panel span-3">
+        <PanelHeader icon={UsersRound} title="追踪官员" meta={`${holdingsData.officials?.length || 0} 个`} />
+        <div className="official-grid">
+          {(holdingsData.officials || []).slice(0, 12).map((official) => (
+            <div className="official-card" key={official.slug}>
+              <strong>{official.name}</strong>
+              <span>{official.title}</span>
+              <small>{official.agency} · {official.transactionCount} 笔 · 最新 {formatDateShort(official.mostRecentFilingDate)}</small>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function AboutAi() {
