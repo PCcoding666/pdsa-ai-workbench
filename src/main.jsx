@@ -37,7 +37,12 @@ const routes = [
   { path: '/voc-insights', label: 'VOC洞察', icon: MessageSquareText },
 ];
 
-const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:3002' : '';
+const API_BASE =
+  window.location.protocol === 'file:'
+    ? 'http://localhost:3002'
+    : window.location.port === '3001'
+      ? `${window.location.protocol}//${window.location.hostname}:3002`
+      : '';
 const briefingCategories = ['模型', '应用', '投融资', '生态'];
 
 const defaultSubscriptions = [
@@ -583,6 +588,16 @@ function joinCompact(items, fallback = '暂无') {
   return values.length ? values.join('、') : fallback;
 }
 
+function formatQueueStatus(status) {
+  const labels = {
+    queued: '待研究',
+    in_progress: '研究中',
+    done: '已完成',
+    blocked: '阻塞',
+  };
+  return labels[status] || status || '待研究';
+}
+
 function formatTicker(value) {
   const ticker = String(value || '').replace(/^\$/, '').trim().toUpperCase();
   return ticker ? `$${ticker}` : '待定义';
@@ -797,6 +812,8 @@ function ResearchQueue() {
   const [message, setMessage] = useState('');
   const [question, setQuestion] = useState('NVDA / AI capex：市场是否低估 hyperscaler 资本开支持续性？');
   const [tickers, setTickers] = useState('NVDA, MSFT, GOOG, AMZN, AMD, AVGO');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [actionItemId, setActionItemId] = useState('');
 
   const loadQueue = async () => {
     setState('loading');
@@ -847,7 +864,77 @@ function ResearchQueue() {
     }
   };
 
+  const updateQueueStatus = async (item, status) => {
+    let payload = {
+      status,
+      actor: 'research-queue-ui',
+      reason: `Manual transition to ${status}.`,
+    };
+
+    if (status === 'done') {
+      const resultSummary = window.prompt('完成这条研究任务的结论摘要是什么？');
+      if (!resultSummary) return;
+      const serenityLoopJson = window.prompt('粘贴 Main Research Agent 的 Serenity loop JSON。缺少该 JSON 不能标记 done。');
+      if (!serenityLoopJson) return;
+      const challengeReviewJson = window.prompt('粘贴 Serenity Challenge Agent review JSON。缺少该 JSON 不能标记 done。');
+      if (!challengeReviewJson) return;
+      let serenityLoop;
+      let challengeReview;
+      try {
+        serenityLoop = JSON.parse(serenityLoopJson);
+        challengeReview = JSON.parse(challengeReviewJson);
+      } catch (error) {
+        setMessage('完成失败：Serenity loop 或 Challenge review 不是合法 JSON');
+        return;
+      }
+      payload = {
+        ...payload,
+        resultSummary,
+        serenityLoop,
+        challengeReview,
+        reason: 'Marked done from research queue UI.',
+      };
+    }
+
+    if (status === 'blocked') {
+      const reason = window.prompt('这条任务为什么阻塞？');
+      if (!reason) return;
+      payload = {
+        ...payload,
+        reason,
+      };
+    }
+
+    setActionItemId(item.id);
+    setMessage('正在更新研究任务状态');
+    try {
+      await apiFetch(`/api/research/queue/${encodeURIComponent(item.id)}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+      setMessage('研究任务状态已更新');
+      await loadQueue();
+    } catch (error) {
+      setMessage('更新研究任务状态失败');
+    } finally {
+      setActionItemId('');
+    }
+  };
+
   const items = queueData.items || [];
+  const statusOptions = useMemo(() => {
+    const values = ['all', 'queued', 'in_progress', 'blocked', 'done'];
+    return values.map((value) => ({
+      value,
+      label: value === 'all' ? '全部' : formatQueueStatus(value),
+      count: value === 'all' ? items.length : items.filter((item) => (item.status || 'queued') === value).length,
+    }));
+  }, [items]);
+  const visibleItems = useMemo(() => (
+    statusFilter === 'all'
+      ? items
+      : items.filter((item) => (item.status || 'queued') === statusFilter)
+  ), [items, statusFilter]);
   const suggestedEvents = (eventsData.events || []).filter((event) => event.tickers?.length).slice(0, 5);
 
   return (
@@ -860,6 +947,7 @@ function ResearchQueue() {
         <div className="metric-strip">
           <Metric icon={ListChecks} label="队列任务" value={items.length} />
           <Metric icon={Clock3} label="待研究" value={(queueData.summary?.byStatus?.queued || 0)} />
+          <Metric icon={Rocket} label="研究中" value={(queueData.summary?.byStatus?.in_progress || 0)} />
           <Metric icon={ShieldCheck} label="高优先级" value={items.filter((item) => item.priority <= 2).length} />
         </div>
       </div>
@@ -882,13 +970,24 @@ function ResearchQueue() {
       </div>
 
       <div className="content-panel span-2">
-        <PanelHeader icon={ListChecks} title="研究队列" meta={`${items.length} 个任务`} />
+        <PanelHeader icon={ListChecks} title="研究队列" meta={`${visibleItems.length}/${items.length} 个任务`} />
+        <div className="source-filter-row">
+          {statusOptions.map((option) => (
+            <button
+              key={option.value}
+              className={statusFilter === option.value ? 'selected' : ''}
+              onClick={() => setStatusFilter(option.value)}
+            >
+              {option.label} · {option.count}
+            </button>
+          ))}
+        </div>
         <div className="queue-list">
-          {items.length ? (
-            items.map((item) => (
+          {visibleItems.length ? (
+            visibleItems.map((item) => (
               <article className="queue-card" key={item.id}>
                 <div className="row-head">
-                  <span>Priority {item.priority} · {item.status}</span>
+                  <span>Priority {item.priority} · {formatQueueStatus(item.status)}</span>
                   <span>{formatEventTime(item.createdAt)}</span>
                 </div>
                 <h3>{item.question}</h3>
@@ -905,6 +1004,34 @@ function ResearchQueue() {
                     <strong>自省问题</strong>
                     <ul>{(item.memoSkeleton?.counterEvidencePrompts || []).slice(0, 3).map((value) => <li key={value}>{value}</li>)}</ul>
                   </div>
+                </div>
+                <div className="queue-action-row">
+                  {(item.status || 'queued') === 'queued' && (
+                    <button className="small-button" onClick={() => updateQueueStatus(item, 'in_progress')} disabled={actionItemId === item.id}>
+                      <Rocket size={14} />
+                      <span>开始</span>
+                    </button>
+                  )}
+                  {(item.status || 'queued') === 'in_progress' && (
+                    <>
+                      <button className="small-button" onClick={() => updateQueueStatus(item, 'done')} disabled={actionItemId === item.id}>
+                        <Check size={14} />
+                        <span>完成</span>
+                      </button>
+                      <button className="small-button" onClick={() => updateQueueStatus(item, 'blocked')} disabled={actionItemId === item.id}>
+                        <ShieldCheck size={14} />
+                        <span>阻塞</span>
+                      </button>
+                    </>
+                  )}
+                  {['blocked', 'done'].includes(item.status) && (
+                    <button className="small-button" onClick={() => updateQueueStatus(item, 'queued')} disabled={actionItemId === item.id}>
+                      <RefreshCcw size={14} />
+                      <span>重新排队</span>
+                    </button>
+                  )}
+                  {item.memoPath && <span className="status-text">Memo 已生成</span>}
+                  {item.obsidianMemoPath && <span className="status-text">Obsidian 已同步</span>}
                 </div>
               </article>
             ))

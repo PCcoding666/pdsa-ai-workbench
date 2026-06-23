@@ -11,6 +11,9 @@
     "serenity:domains:once": "node scripts/serenity-domain-scheduler.js",
     "serenity:domains:dry-run": "node scripts/serenity-domain-scheduler.js --dry-run",
     "serenity:domains:watch": "node scripts/serenity-domain-scheduler.js --watch",
+    "research:ops": "node scripts/research-ops-runner.js",
+    "research:ops:summary": "node scripts/research-ops-runner.js --summary",
+    "research:ops:notify-test": "node scripts/research-ops-runner.js --notify-test",
     "server": "node server/index.js",
     "test": "node --test",
     "build": "vite build",
@@ -18,10 +21,11 @@
   },
   "dependencies": {
     "express": "^5.1.0",
-    "rss-parser": "^3.13.0",
+    "lucide-react": "^0.545.0",
+    "playwright": "^1.51.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "lucide-react": "^0.545.0"
+    "rss-parser": "^3.13.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.4",

@@ -25,6 +25,14 @@ import {
   mergeSerenityDomainWatchlist,
 } from './serenity-domain-scheduler.js';
 import { buildSerenityCompanyAnalysisMock } from './serenity-company-analysis.js';
+import { fetchAgentGoPageSnapshot } from './agentgo-browser.js';
+import {
+  claimNextResearchQueueItem,
+  readResearchOpsLog,
+  sendBarkNotification,
+  updateResearchQueueItemStatus,
+  writeResearchQueueMemo,
+} from './research-ops.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -668,6 +676,75 @@ app.post('/api/research/queue', (req, res) => {
   } catch (error) {
     res.status(400).json({
       error: 'RESEARCH_QUEUE_CREATE_FAILED',
+      message: error.message,
+    });
+  }
+});
+
+app.post('/api/research/queue/claim-next', (req, res) => {
+  try {
+    const result = claimNextResearchQueueItem({
+      actor: truncate(cleanText(req.body?.actor || 'research-ops-api'), 80),
+      reason: truncate(cleanText(req.body?.reason || 'Claimed from research ops API.'), 1000),
+      syncObsidian: req.body?.syncObsidian !== false,
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({
+      error: 'RESEARCH_QUEUE_CLAIM_FAILED',
+      message: error.message,
+    });
+  }
+});
+
+app.patch('/api/research/queue/:id/status', (req, res) => {
+  try {
+    const result = updateResearchQueueItemStatus(req.params.id, req.body || {});
+    res.json(result);
+  } catch (error) {
+    res.status(error.message.includes('not found') ? 404 : 400).json({
+      error: 'RESEARCH_QUEUE_STATUS_UPDATE_FAILED',
+      message: error.message,
+    });
+  }
+});
+
+app.post('/api/research/queue/:id/memo', (req, res) => {
+  try {
+    const result = writeResearchQueueMemo(req.params.id, req.body || {});
+    res.status(201).json(result);
+  } catch (error) {
+    res.status(error.message.includes('not found') ? 404 : 400).json({
+      error: 'RESEARCH_QUEUE_MEMO_WRITE_FAILED',
+      message: error.message,
+    });
+  }
+});
+
+app.get('/api/research/ops/log', (req, res) => {
+  res.json({
+    generatedAt: new Date().toISOString(),
+    entries: readResearchOpsLog(clampNumber(req.query.limit, 1, 500, 100)),
+  });
+});
+
+app.post('/api/research/ops/notify', async (req, res) => {
+  const result = await sendBarkNotification({
+    title: req.body?.title || 'Information Gain Research Ops',
+    body: req.body?.body || req.body?.message || 'Research ops notification test.',
+    group: req.body?.group || 'Information Gain',
+    url: req.body?.url || '',
+  });
+  res.status(result.status === 'failed' ? 502 : 200).json(result);
+});
+
+app.post('/api/research/ops/agentgo/snapshot', async (req, res) => {
+  try {
+    const result = await fetchAgentGoPageSnapshot(req.body || {});
+    res.status(result.status === 'skipped' ? 424 : 200).json(result);
+  } catch (error) {
+    res.status(400).json({
+      error: 'AGENTGO_SNAPSHOT_FAILED',
       message: error.message,
     });
   }
