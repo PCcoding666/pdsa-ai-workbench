@@ -29,6 +29,12 @@ npm run dev:all
 - `POST /api/events/transcripts`：写入一段直播 ASR 转录，服务端会生成带来源、时间戳、ticker、主题和证据片段的事件。
 - `GET /api/research/queue`：读取研究队列。
 - `POST /api/research/queue`：从事件或手动问题创建研究任务，自动生成证据链 memo 骨架和自省问题。
+- `POST /api/research/queue/claim-next`：领取下一条最高优先级 queued 任务，标记为 `in_progress`，生成本地 research memo 并同步 Obsidian。
+- `PATCH /api/research/queue/:id/status`：按状态机更新研究任务，支持 `queued`、`in_progress`、`done`、`blocked`。
+- `POST /api/research/queue/:id/memo`：为某条研究任务生成 Markdown research memo，并同步到 Obsidian memo 目录。
+- `GET /api/research/ops/log`：读取 research ops 自动化日志。
+- `POST /api/research/ops/notify`：通过 Bark 发送 research ops 通知；未配置 Bark 时返回 skipped。
+- `POST /api/research/ops/agentgo/snapshot`：在配置 `AGENTGO_API_KEY` 且安装 `playwright@1.51.0` 后，通过 AgentGo 云端浏览器读取公开网页快照。
 - `GET /api/serenity/research-system`：读取 Serenity 方法论系统，合并本地 X archive、固定 thesis cards、手动候选卡和证据片段。
 - `POST /api/serenity/company-analysis/mock`：工作流 A 的 mock 接口。输入一个 ticker，返回“股票 -> 产业链位置 -> 上下游 -> 财务传导 -> 定价缺口 -> Red Team”的分析契约；不写入正式 Research Run。
 - `GET /api/serenity/domain-research`：读取模块二定时领域研究 watchlist、默认领域拆解和最近 scheduler 状态。
@@ -74,6 +80,145 @@ curl -X POST http://localhost:3002/api/research/queue \
 - 自动证据：从本地 archive 的 `symbols`、中英文本、互动数和 URL 里匹配证据片段。
 - 研究队列联动：每张卡可以一键进入 `/research-queue`，后续按一手文件和反证条件继续研究。
 - Codex skill：流程已沉淀为 `~/.codex/skills/serenity-market-discovery`，当前按 Protocol V2 执行后续新市场发现任务。
+
+## Research Ops 自动化操作系统
+
+研究队列现在有独立的操作层，而不是只保存待办事项：
+
+- 状态机：`queued -> in_progress -> done/blocked`，`blocked/done` 可重新排回 `queued`。
+- 每次状态变化会记录 `statusHistory`，包含原状态、新状态、时间、actor 和原因。
+- `done` 必须带 `resultSummary` 或 memo，避免无证据地标完成。
+- `blocked` 必须带阻塞原因。
+- 领取任务会写入本地 memo：`data/research-memos/`。
+- 默认同步 Obsidian：`Projects/Information Gain/Research Memos`。
+- 操作日志保存到：`data/research-ops-log.jsonl`。
+- agent 完成任务时可以通过 `RESEARCH_DISCOVERED_TASKS_JSON` 追加新任务；新任务仍保持 queued，不能绕过研究队列直接成为结论。
+- 自动化完成任务时必须写入 Serenity loop review，不能只证明“需求真实”就标记为完整结论。
+- 若找不到可用标的，也要记录 `closed_no_candidate` 式理由、已筛过的上市载体、Fatal Gate 缺口和下一条决定性证据。
+
+### Research Loop 完成契约
+
+`npm run research:ops -- --complete` 默认要求以下字段；缺失时 runner 会拒绝完成任务：
+
+- `RESEARCH_LOOP_VERDICT`：本轮判断，例如 `partial_not_candidate_ready`、`closed_no_candidate`、`candidate_watchlist`。
+- `RESEARCH_SCARCITY_ASSESSMENT`：哪一层是真的稀缺，或者为什么没有找到可验证稀缺层。
+- `RESEARCH_CANDIDATE_MAPPINGS_JSON` 或 `RESEARCH_CANDIDATE_CONCLUSION`：候选标的、产业链角色、需求到公司层面的传导和缺口；无候选时写淘汰理由。
+- `RESEARCH_DEMAND_TO_TICKER_GAP`：从顶层需求到收入、毛利、订单、backlog、现金流或估值的 gap。
+- `RESEARCH_FATAL_GATE_REVIEW_JSON`：至少记录 tradable/liquidity/verifiable data/direct exposure/business purity/substitution 等关键 Fatal Gate 的状态、证据和缺口。
+- `RESEARCH_PRICING_GAP`：区分 good industry、good company、good stock，以及市场是否已经计价。
+- `RESEARCH_NEXT_DECISIVE_EVIDENCE_JSON`：下一条能升级、降级或淘汰候选的证据。
+- `RESEARCH_CHALLENGE_VERDICT`：Serenity Challenge Agent 的独立复核结论。
+- `RESEARCH_UPGRADE_DECISION`：reviewer 是否允许升级候选、关闭 run，或只允许记录子任务完成。
+- `RESEARCH_CHAIN_COVERAGE_JSON`：按 Serenity 链路逐层检查覆盖情况。
+- `RESEARCH_MISSING_LAYERS_JSON`：仍缺失或只有 partial 证据的 Serenity 层。
+- `RESEARCH_CHALLENGE_QUESTIONS_JSON`：针对遗漏、弱假设、替代路线和升级阻断点的挑战问题。
+- `RESEARCH_RED_TEAM_SEARCHES_JSON`：至少 3 条反向搜索或挑战路径。
+- `RESEARCH_REVIEWER_REQUIRED_FIXES_JSON` 或 `RESEARCH_NEXT_CHALLENGE_TASKS_JSON`：reviewer 要求主 agent 补做的研究。
+
+也可以用一个 JSON 对象传入：
+
+```bash
+RESEARCH_SERENITY_LOOP_JSON='{
+  "loopVerdict": "partial_not_candidate_ready",
+  "scarcityAssessment": "Demand is supported, but the scarce layer is still unverified.",
+  "candidateMappings": [
+    {
+      "ticker": "EXAMPLE",
+      "role": "Listed carrier to screen",
+      "demandLink": "Demand could reach revenue only if segment exposure and qualification are verified.",
+      "gap": "No primary-source exposure proof yet.",
+      "status": "screening"
+    }
+  ],
+  "demandToTickerGap": "Financial transmission is not proven.",
+  "fatalGateReview": [
+    {
+      "gate": "Direct business relationship to bottleneck",
+      "status": "unknown",
+      "gap": "Needs filing or customer qualification evidence."
+    }
+  ],
+  "pricingGap": "No conclusion until market expectations are measured.",
+  "nextDecisiveEvidence": ["Check latest filing segment exposure", "Search customer qualification evidence"]
+}'
+```
+
+正常 automation 不允许跳过 completion contract。历史 backfill 若必须使用 runner bypass，必须同时设置 `RESEARCH_CONTRACT_BYPASS_MODE=backfill` 和 `RESEARCH_CONTRACT_BYPASS_REASON`，并会写入 ops log。
+
+### 多 Agent 协作
+
+每个自动化 research loop 分成两个角色：
+
+- Main Research Agent：收集证据，写出需求、路线、稀缺层、候选映射、Fatal Gate、定价 gap 和下一条决定性证据。
+- Serenity Challenge Agent：独立 review 主 agent 的推理链，逐层检查 `top-level demand -> technology route -> necessary dependency -> bottleneck -> supplier landscape -> listed carrier -> business purity -> financial transmission -> market expectations -> pricing gap -> catalyst -> risk -> falsifier`，并给出 missing layers、challenge questions、Red Team searches、required fixes 和 upgrade decision。
+
+`--complete` 默认同时要求 Main Research Agent 的 Serenity loop 和 Challenge Agent review。若 reviewer 结论是 `fail_upgrade`、`partial_not_candidate_ready` 或 required fixes 未完成，任务可以记录为子任务完成，但不能升级候选、不能关闭完整 Research Run。
+
+Challenge review 可用独立 JSON 传入：
+
+```bash
+RESEARCH_CHALLENGE_REVIEW_JSON='{
+  "reviewVerdict": "fail_upgrade: chain incomplete",
+  "upgradeDecision": "Do not upgrade; keep as partial research.",
+  "chainCoverage": [
+    {"name": "top-level demand", "status": "covered"},
+    {"name": "technology route", "status": "missing"},
+    {"name": "necessary dependency", "status": "missing"},
+    {"name": "bottleneck", "status": "missing"},
+    {"name": "supplier landscape", "status": "missing"},
+    {"name": "listed carrier", "status": "partial"},
+    {"name": "business purity", "status": "missing"},
+    {"name": "financial transmission", "status": "missing"},
+    {"name": "market expectations", "status": "missing"},
+    {"name": "pricing gap", "status": "missing"},
+    {"name": "catalyst", "status": "missing"},
+    {"name": "risk", "status": "covered"},
+    {"name": "falsifier", "status": "covered"}
+  ],
+  "missingLayers": ["technology route", "supplier landscape", "pricing gap"],
+  "challengeQuestions": [
+    {"name": "Is demand growth already reflected in price and expectations?", "status": "unanswered"}
+  ],
+  "redTeamSearches": [
+    {"name": "competitor supplier", "status": "needed"},
+    {"name": "alternative technology route", "status": "needed"},
+    {"name": "gross margin / valuation risk", "status": "needed"}
+  ],
+  "requiredFixes": ["Run supplier count and pricing gap before upgrade."],
+  "nextChallengeTasks": ["Create follow-up queue item for missing layers."]
+}'
+```
+
+正常 automation 不允许跳过 completion contract。历史 backfill 若必须使用 runner bypass，必须同时设置 `RESEARCH_CONTRACT_BYPASS_MODE=backfill` 和 `RESEARCH_CONTRACT_BYPASS_REASON`，并会写入 ops log。
+
+常用命令：
+
+```bash
+npm run research:ops:summary
+npm run research:ops
+npm run research:ops:notify-test
+```
+
+Bark 推送配置：
+
+```bash
+BARK_SERVER="https://api.day.app"
+BARK_KEY="your-device-key"
+```
+
+也可以直接配置完整 webhook：
+
+```bash
+BARK_PUSH_URL="https://api.day.app/your-device-key"
+```
+
+AgentGo 云端浏览器配置：
+
+```bash
+AGENTGO_API_KEY="your-agentgo-key"
+```
+
+边界：AgentGo 只用于正常访问可合法打开的网页、截图和材料提取；不抽取或转移 Chrome cookies，不绕过登录、DRM、付费墙、robots/访问控制或反爬机制。
 
 ### A/B 双入口
 
