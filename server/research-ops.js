@@ -486,6 +486,10 @@ function buildResearchQueueMemo(item, input = {}, now = new Date().toISOString()
       'Not recorded. The memo has not yet separated good industry, good company and good stock.'
     ),
     '',
+    '## Valuation / Expensive-Cheap Check',
+    '',
+    ...formatValuationReview(serenityLoop.valuationReview),
+    '',
     '## Next Decisive Evidence',
     '',
     ...toBulletLines(
@@ -561,7 +565,7 @@ function buildDefaultMemoSkeleton(question, tickers, themes) {
       'Candidate mapping from demand to revenue, margin, backlog, cash flow or valuation.',
       'Fatal Gate status with evidence and gaps.',
       'Independent Serenity Challenge Agent review covering chain completeness, omitted layers and upgrade blockers.',
-      'Market expectation or valuation reference.',
+      'Structured valuation sanity check: market cap, enterprise value, P/E or reason P/E is not meaningful, sales multiple, price performance, historical range, consensus or guidance trend, and a cheap/fair/expensive/unknown conclusion.',
       'Counter-evidence or substitution route.',
     ],
     counterEvidencePrompts: [
@@ -630,6 +634,9 @@ function normalizeSerenityLoopReview(input = {}) {
   const fatalGateReview = normalizeFatalGateReview(
     input.fatalGateReview || input.fatal_gate_review || input.fatalGates || input.fatal_gates || []
   );
+  const valuationReview = normalizeValuationReview(
+    input.valuationReview || input.valuation_review || input.valuation || input.valuationRows || input.valuation_rows || []
+  );
 
   return {
     loopVerdict: truncate(cleanText(input.loopVerdict || input.loop_verdict || input.verdict || ''), 1000),
@@ -648,6 +655,7 @@ function normalizeSerenityLoopReview(input = {}) {
     ),
     candidateMappings,
     fatalGateReview,
+    valuationReview,
     nextDecisiveEvidence: normalizeStringArray(input.nextDecisiveEvidence || input.next_decisive_evidence || []),
   };
 }
@@ -669,6 +677,7 @@ function hasSerenityLoopReview(review = {}) {
       cleanText(review.candidateConclusion) ||
       review.candidateMappings?.length ||
       review.fatalGateReview?.length ||
+      review.valuationReview?.length ||
       review.nextDecisiveEvidence?.length
   );
 }
@@ -693,6 +702,9 @@ function getSerenityLoopCompletionGaps(review = {}) {
   if (!cleanText(review.demandToTickerGap)) missing.push('serenityLoop.demandToTickerGap');
   if (!review.fatalGateReview?.length) missing.push('serenityLoop.fatalGateReview');
   if (!cleanText(review.pricingGap)) missing.push('serenityLoop.pricingGap');
+  if (review.candidateMappings?.length && !review.valuationReview?.length) {
+    missing.push('serenityLoop.valuationReview for mapped candidates');
+  }
   if (!review.nextDecisiveEvidence?.length) missing.push('serenityLoop.nextDecisiveEvidence');
   return missing;
 }
@@ -715,6 +727,40 @@ function normalizeCandidateMappings(rows) {
     .filter((row) => row.ticker || row.name || row.role || row.demandLink || row.gap);
 }
 
+function normalizeValuationReview(rows) {
+  const list = Array.isArray(rows)
+    ? rows
+    : Object.entries(rows && typeof rows === 'object' ? rows : {}).map(([ticker, value]) => ({
+        ticker,
+        ...(value && typeof value === 'object' ? value : { valuationConclusion: value }),
+      }));
+
+  return list
+    .map((row) => ({
+      ticker: truncate(cleanText(row.ticker || row.symbol || row.name || ''), 40),
+      asOfDate: truncate(cleanText(row.asOfDate || row.as_of_date || row.date || ''), 40),
+      marketCap: truncate(cleanText(row.marketCap || row.market_cap || ''), 80),
+      enterpriseValue: truncate(cleanText(row.enterpriseValue || row.enterprise_value || row.ev || ''), 80),
+      peTtm: truncate(cleanText(row.peTtm || row.pe_ttm || row.ttmPe || row.ttm_pe || row.pe || ''), 80),
+      peForward: truncate(cleanText(row.peForward || row.pe_forward || row.forwardPe || row.forward_pe || ''), 80),
+      salesMultiple: truncate(cleanText(row.salesMultiple || row.sales_multiple || row.ps || row.priceSales || row.evSales || ''), 80),
+      pricePerformance: truncate(
+        cleanText(row.pricePerformance || row.price_performance || row.performance || row.pricePerf || ''),
+        240
+      ),
+      historicalRange: truncate(cleanText(row.historicalRange || row.historical_range || row.history || ''), 240),
+      consensusTrend: truncate(cleanText(row.consensusTrend || row.consensus_trend || row.estimates || ''), 240),
+      guidanceTrend: truncate(cleanText(row.guidanceTrend || row.guidance_trend || row.guidance || ''), 240),
+      conclusion: truncate(
+        cleanText(row.conclusion || row.valuationConclusion || row.valuation_conclusion || row.verdict || row.status || ''),
+        120
+      ),
+      evidence: truncate(cleanText(row.evidence || row.basis || row.reason || ''), 1000),
+      gap: truncate(cleanText(row.gap || row.missingEvidence || row.missing_evidence || row.limitations || ''), 1000),
+    }))
+    .filter((row) => row.ticker || row.conclusion || row.evidence || row.gap);
+}
+
 function normalizeFatalGateReview(rows) {
   const list = Array.isArray(rows)
     ? rows
@@ -731,6 +777,33 @@ function normalizeFatalGateReview(rows) {
       gap: truncate(cleanText(row.gap || row.missingEvidence || row.missing_evidence || row.risk || ''), 1000),
     }))
     .filter((row) => row.gate || row.evidence || row.gap);
+}
+
+function formatValuationReview(rows = []) {
+  if (!rows.length) {
+    return [
+      '- Not recorded. No candidate should be described as cheap, expensive, attractive, or mispriced until valuation is checked.',
+    ];
+  }
+  return rows.map((row) => {
+    const label = row.ticker || 'Unspecified candidate';
+    const parts = [
+      row.asOfDate ? `as of: ${row.asOfDate}` : '',
+      row.marketCap ? `market cap: ${row.marketCap}` : '',
+      row.enterpriseValue ? `EV: ${row.enterpriseValue}` : '',
+      row.peTtm ? `P/E TTM: ${row.peTtm}` : '',
+      row.peForward ? `P/E forward: ${row.peForward}` : '',
+      row.salesMultiple ? `sales multiple: ${row.salesMultiple}` : '',
+      row.pricePerformance ? `price performance: ${row.pricePerformance}` : '',
+      row.historicalRange ? `historical range: ${row.historicalRange}` : '',
+      row.consensusTrend ? `consensus: ${row.consensusTrend}` : '',
+      row.guidanceTrend ? `guidance: ${row.guidanceTrend}` : '',
+      row.conclusion ? `conclusion: ${row.conclusion}` : '',
+      row.evidence ? `evidence: ${row.evidence}` : '',
+      row.gap ? `gap: ${row.gap}` : '',
+    ].filter(Boolean);
+    return `- ${label}: ${parts.join('; ') || 'No valuation details recorded.'}`;
+  });
 }
 
 function formatSerenityLoopVerdict(review = {}) {

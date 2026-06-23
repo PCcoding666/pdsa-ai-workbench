@@ -55,6 +55,22 @@ function sampleSerenityLoop() {
       },
     ],
     pricingGap: 'No good-stock conclusion until expectations and valuation are checked.',
+    valuationReview: [
+      {
+        ticker: 'TEST',
+        asOfDate: '2026-06-23',
+        marketCap: 'unknown',
+        enterpriseValue: 'unknown',
+        peTtm: 'not meaningful until profitability is verified',
+        salesMultiple: 'unknown',
+        pricePerformance: 'not reviewed',
+        historicalRange: 'not reviewed',
+        consensusTrend: 'not reviewed',
+        guidanceTrend: 'not reviewed',
+        conclusion: 'unknown_not_cheap_or_expensive',
+        gap: 'Valuation data must be checked before any good-stock conclusion.',
+      },
+    ],
     nextDecisiveEvidence: ['Check latest filing segment exposure.'],
   };
 }
@@ -170,10 +186,36 @@ test('research ops completes a task and records auditable memo evidence', () => 
   assert.match(content, /TEST \/ Test Carrier/);
   assert.match(content, /Fatal Gate Review/);
   assert.match(content, /Direct business relationship to bottleneck/);
+  assert.match(content, /Valuation \/ Expensive-Cheap Check/);
+  assert.match(content, /unknown_not_cheap_or_expensive/);
   assert.match(content, /Serenity Challenge Agent Review/);
   assert.match(content, /fail_upgrade/);
   assert.match(content, /supplier landscape/);
   assert.equal(memo.obsidian.status, 'success');
+});
+
+test('research ops rejects mapped candidates without valuation review', () => {
+  researchOps.addResearchQueueItems([{ id: 'rq:test-valuation-gate', priority: 1, question: 'Valuation gate task' }]);
+  researchOps.updateResearchQueueItemStatus('rq:test-valuation-gate', {
+    status: 'in_progress',
+    actor: 'test-agent',
+    reason: 'Start valuation gate test.',
+  });
+
+  const loopWithoutValuation = sampleSerenityLoop();
+  delete loopWithoutValuation.valuationReview;
+
+  assert.throws(
+    () =>
+      researchOps.updateResearchQueueItemStatus('rq:test-valuation-gate', {
+        status: 'done',
+        actor: 'test-agent',
+        resultSummary: 'Mapped a candidate but did not check valuation.',
+        serenityLoop: loopWithoutValuation,
+        challengeReview: sampleChallengeReview(),
+      }),
+    /serenityLoop\.valuationReview/
+  );
 });
 
 test('research ops runner rejects completion without Serenity loop review', () => {
@@ -227,4 +269,45 @@ test('research ops runner rejects completion without Challenge Agent review', ()
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /requires an independent Serenity Challenge Agent review/);
+});
+
+test('research ops runner rejects mapped candidates without valuation review', () => {
+  researchOps.addResearchQueueItems([{ id: 'rq:test-runner-valuation', priority: 1, question: 'Runner valuation contract task' }]);
+  researchOps.updateResearchQueueItemStatus('rq:test-runner-valuation', {
+    status: 'in_progress',
+    actor: 'test-agent',
+    reason: 'Start runner valuation contract test.',
+  });
+
+  const result = spawnSync(process.execPath, ['scripts/research-ops-runner.js', '--complete'], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      RESEARCH_QUEUE_ITEM_ID: 'rq:test-runner-valuation',
+      RESEARCH_RESULT_SUMMARY: 'Summary with a mapped candidate but no valuation review.',
+      RESEARCH_AGENT_NAME: 'test-runner',
+      RESEARCH_LOOP_VERDICT: 'partial_not_candidate_ready',
+      RESEARCH_SCARCITY_ASSESSMENT: 'Scarce layer not yet proven.',
+      RESEARCH_CANDIDATE_MAPPINGS_JSON: JSON.stringify([{ ticker: 'TEST', status: 'screening' }]),
+      RESEARCH_DEMAND_TO_TICKER_GAP: 'Financial transmission missing.',
+      RESEARCH_FATAL_GATE_REVIEW_JSON: JSON.stringify([{ gate: 'Direct business relationship to bottleneck', status: 'unknown' }]),
+      RESEARCH_PRICING_GAP: 'Pricing gap missing.',
+      RESEARCH_NEXT_DECISIVE_EVIDENCE_JSON: JSON.stringify(['Supplier count review.']),
+      RESEARCH_CHALLENGE_VERDICT: 'fail_upgrade.',
+      RESEARCH_UPGRADE_DECISION: 'Do not upgrade.',
+      RESEARCH_CHAIN_COVERAGE_JSON: JSON.stringify(serenityChain.map((name) => ({ name, status: 'partial' }))),
+      RESEARCH_MISSING_LAYERS_JSON: JSON.stringify(['pricing gap']),
+      RESEARCH_CHALLENGE_QUESTIONS_JSON: JSON.stringify([{ name: 'Is demand reflected in price?', status: 'unanswered' }]),
+      RESEARCH_RED_TEAM_SEARCHES_JSON: JSON.stringify([
+        { name: 'TEST competitor supplier', status: 'needed' },
+        { name: 'TEST alternative technology', status: 'needed' },
+        { name: 'TEST gross margin risk', status: 'needed' },
+      ]),
+      RESEARCH_REVIEWER_REQUIRED_FIXES_JSON: JSON.stringify(['Add valuation review.']),
+    },
+    encoding: 'utf8',
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /RESEARCH_VALUATION_REVIEW_JSON/);
 });

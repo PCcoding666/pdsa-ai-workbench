@@ -197,6 +197,7 @@ function buildSerenityLoopFromEnv() {
 
   applyJsonEnv(serenityLoop, 'candidateMappings', 'RESEARCH_CANDIDATE_MAPPINGS_JSON');
   applyJsonEnv(serenityLoop, 'fatalGateReview', 'RESEARCH_FATAL_GATE_REVIEW_JSON');
+  applyJsonEnv(serenityLoop, 'valuationReview', 'RESEARCH_VALUATION_REVIEW_JSON');
   applyJsonEnv(serenityLoop, 'nextDecisiveEvidence', 'RESEARCH_NEXT_DECISIVE_EVIDENCE_JSON');
 
   return serenityLoop;
@@ -226,6 +227,9 @@ function validateSerenityLoopForCompletion(serenityLoop) {
   }
   if (!cleanEnvText(serenityLoop.pricingGap || serenityLoop.pricing_gap || serenityLoop.expectationGap || serenityLoop.expectation_gap)) {
     missing.push('RESEARCH_PRICING_GAP');
+  }
+  if (hasArrayOrText(serenityLoop.candidateMappings || serenityLoop.candidate_mappings || serenityLoop.candidates) && !hasArrayOrText(serenityLoop.valuationReview || serenityLoop.valuation_review || serenityLoop.valuation)) {
+    missing.push('RESEARCH_VALUATION_REVIEW_JSON for mapped candidates');
   }
   if (!hasArrayOrText(serenityLoop.nextDecisiveEvidence || serenityLoop.next_decisive_evidence)) {
     missing.push('RESEARCH_NEXT_DECISIVE_EVIDENCE_JSON');

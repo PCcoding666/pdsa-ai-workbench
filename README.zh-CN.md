@@ -106,6 +106,7 @@ curl -X POST http://localhost:3002/api/research/queue \
 - `RESEARCH_DEMAND_TO_TICKER_GAP`：从顶层需求到收入、毛利、订单、backlog、现金流或估值的 gap。
 - `RESEARCH_FATAL_GATE_REVIEW_JSON`：至少记录 tradable/liquidity/verifiable data/direct exposure/business purity/substitution 等关键 Fatal Gate 的状态、证据和缺口。
 - `RESEARCH_PRICING_GAP`：区分 good industry、good company、good stock，以及市场是否已经计价。
+- `RESEARCH_VALUATION_REVIEW_JSON`：只要记录了候选映射，就必须做结构化估值 sanity check；至少写 market cap、EV、P/E 或为什么 P/E 不适用、sales multiple、3/6/12 个月价格表现、历史估值区间、共识/指引变化，以及 `cheap` / `fair` / `expensive` / `unknown_not_analyzed` 结论。没有这一层，系统不能把候选描述成便宜、贵、mispriced 或 attractive。
 - `RESEARCH_NEXT_DECISIVE_EVIDENCE_JSON`：下一条能升级、降级或淘汰候选的证据。
 - `RESEARCH_CHALLENGE_VERDICT`：Serenity Challenge Agent 的独立复核结论。
 - `RESEARCH_UPGRADE_DECISION`：reviewer 是否允许升级候选、关闭 run，或只允许记录子任务完成。
@@ -139,6 +140,22 @@ RESEARCH_SERENITY_LOOP_JSON='{
     }
   ],
   "pricingGap": "No conclusion until market expectations are measured.",
+  "valuationReview": [
+    {
+      "ticker": "EXAMPLE",
+      "asOfDate": "2026-06-23",
+      "marketCap": "unknown",
+      "enterpriseValue": "unknown",
+      "peTtm": "not meaningful until profitability is verified",
+      "salesMultiple": "unknown",
+      "pricePerformance": "3M/6M/12M not reviewed",
+      "historicalRange": "not reviewed",
+      "consensusTrend": "not reviewed",
+      "guidanceTrend": "not reviewed",
+      "conclusion": "unknown_not_analyzed",
+      "gap": "No good-stock conclusion until valuation and expectations are checked."
+    }
+  ],
   "nextDecisiveEvidence": ["Check latest filing segment exposure", "Search customer qualification evidence"]
 }'
 ```
