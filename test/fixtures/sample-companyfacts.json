@@ -1,0 +1,58 @@
+{
+  "cik": 1158114,
+  "entityName": "Sample Test Co",
+  "facts": {
+    "dei": {
+      "EntityCommonStockSharesOutstanding": {
+        "units": {
+          "shares": [
+            { "end": "2025-06-30", "val": 40000000, "fy": 2025, "fp": "Q2", "form": "10-Q" },
+            { "end": "2026-06-30", "val": 50000000, "fy": 2026, "fp": "Q2", "form": "10-Q" }
+          ]
+        }
+      }
+    },
+    "us-gaap": {
+      "RevenueFromContractWithCustomerExcludingAssessedTax": {
+        "units": {
+          "USD": [
+            { "start": "2025-01-01", "end": "2025-12-31", "val": 300000000, "fy": 2025, "fp": "FY", "form": "10-K" },
+            { "start": "2025-07-01", "end": "2025-09-30", "val": 80000000, "fy": 2025, "fp": "Q3", "form": "10-Q" },
+            { "start": "2025-10-01", "end": "2025-12-31", "val": 90000000, "fy": 2025, "fp": "Q4", "form": "10-K" },
+            { "start": "2026-01-01", "end": "2026-03-31", "val": 100000000, "fy": 2026, "fp": "Q1", "form": "10-Q" },
+            { "start": "2026-04-01", "end": "2026-06-30", "val": 110000000, "fy": 2026, "fp": "Q2", "form": "10-Q" }
+          ]
+        }
+      },
+      "CashAndCashEquivalentsAtCarryingValue": {
+        "units": {
+          "USD": [
+            { "end": "2025-06-30", "val": 90000000, "fy": 2025, "fp": "Q2", "form": "10-Q" },
+            { "end": "2026-06-30", "val": 120000000, "fy": 2026, "fp": "Q2", "form": "10-Q" }
+          ]
+        }
+      },
+      "NetCashProvidedByUsedInOperatingActivities": {
+        "units": {
+          "USD": [
+            { "start": "2026-04-01", "end": "2026-06-30", "val": -30000000, "fy": 2026, "fp": "Q2", "form": "10-Q" }
+          ]
+        }
+      },
+      "LongTermDebtNoncurrent": {
+        "units": {
+          "USD": [
+            { "end": "2026-06-30", "val": 20000000, "fy": 2026, "fp": "Q2", "form": "10-Q" }
+          ]
+        }
+      },
+      "LongTermDebtCurrent": {
+        "units": {
+          "USD": [
+            { "end": "2026-06-30", "val": 5000000, "fy": 2026, "fp": "Q2", "form": "10-Q" }
+          ]
+        }
+      }
+    }
+  }
+}

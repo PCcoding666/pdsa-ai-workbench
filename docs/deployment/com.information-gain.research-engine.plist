@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template: daily one-cycle run of the Information Gain research engine.
+  1) Replace every REPLACE_ME below.
+  2) mkdir -p <repo>/logs
+  3) cp to ~/Library/LaunchAgents/ && launchctl load it.
+  This template is not installed automatically — installing it is a human gate.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.information-gain.research-engine</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>REPLACE_ME/node</string><!-- e.g. /usr/local/bin/node or output of `which node` -->
+    <string>scripts/research-engine.js</string>
+    <string>--once</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>REPLACE_ME</string><!-- e.g. /Users/chengpeng/Documents/Information-Gain -->
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SEC_USER_AGENT</key>
+    <string>REPLACE_ME</string><!-- e.g. Information Gain research you@example.com -->
+    <key>UNIVERSE_FILE</key>
+    <string>REPLACE_ME/config/auto-research-universe.json</string><!-- git-tracked auto research scope -->
+    <key>BARK_PUSH_URL</key>
+    <string>REPLACE_ME_OR_DELETE_THIS_PAIR</string><!-- e.g. https://api.day.app/yourkey -->
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>6</integer>
+    <key>Minute</key>
+    <integer>15</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>REPLACE_ME/logs/research-engine.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>REPLACE_ME/logs/research-engine.err.log</string>
+</dict>
+</plist>

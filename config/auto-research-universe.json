@@ -1,0 +1,199 @@
+{
+  "name": "auto-research-universe",
+  "description": "Git-tracked universe for the daily auto research job. Runtime state belongs in data/; this file defines what another machine should research after git pull.",
+  "defaultBenchmark": "SOXX",
+  "universe": [
+    {
+      "ticker": "NVDA",
+      "domain": "AI industry chain",
+      "benchmark": "SOXX",
+      "role": "accelerator and rack-scale platform demand anchor"
+    },
+    {
+      "ticker": "AMD",
+      "domain": "AI industry chain",
+      "benchmark": "SOXX",
+      "role": "accelerator alternative and CPU/GPU platform supplier"
+    },
+    {
+      "ticker": "AVGO",
+      "domain": "AI industry chain",
+      "benchmark": "SOXX",
+      "role": "custom silicon and networking anchor"
+    },
+    {
+      "ticker": "TSM",
+      "domain": "AI industry chain",
+      "benchmark": "SOXX",
+      "role": "leading-node foundry and advanced packaging anchor"
+    },
+    {
+      "ticker": "ASML",
+      "domain": "AI industry chain",
+      "benchmark": "SOXX",
+      "role": "lithography equipment bottleneck anchor"
+    },
+    {
+      "ticker": "AMAT",
+      "domain": "AI industry chain",
+      "benchmark": "SOXX",
+      "role": "semiconductor equipment anchor"
+    },
+    {
+      "ticker": "MU",
+      "domain": "AI industry chain",
+      "benchmark": "SOXX",
+      "role": "HBM / DRAM / NAND memory anchor"
+    },
+    {
+      "ticker": "ANET",
+      "domain": "AI industry chain",
+      "benchmark": "SOXX",
+      "role": "AI data-center networking anchor"
+    },
+    {
+      "ticker": "VRT",
+      "domain": "AI industry chain",
+      "benchmark": "SOXX",
+      "role": "data-center power and cooling infrastructure anchor"
+    },
+    {
+      "ticker": "ETN",
+      "domain": "AI industry chain",
+      "benchmark": "SOXX",
+      "role": "electrical equipment and power distribution anchor"
+    },
+    {
+      "ticker": "MOD",
+      "domain": "AI rack power and thermal architecture",
+      "benchmark": "SOXX",
+      "role": "thermal-management exposure to data-center cooling"
+    },
+    {
+      "ticker": "POWL",
+      "domain": "AI rack power and thermal architecture",
+      "benchmark": "SOXX",
+      "role": "switchgear and electrical infrastructure watchlist"
+    },
+    {
+      "ticker": "GEV",
+      "domain": "AI rack power and thermal architecture",
+      "benchmark": "SOXX",
+      "role": "grid and power equipment anchor"
+    },
+    {
+      "ticker": "LITE",
+      "domain": "AI photonics, CPO and external light sources",
+      "benchmark": "SOXX",
+      "role": "laser and optical component anchor"
+    },
+    {
+      "ticker": "COHR",
+      "domain": "AI photonics, CPO and external light sources",
+      "benchmark": "SOXX",
+      "role": "laser / optical component anchor"
+    },
+    {
+      "ticker": "AAOI",
+      "domain": "AI photonics, CPO and external light sources",
+      "benchmark": "SOXX",
+      "role": "smaller optical-module watchlist"
+    },
+    {
+      "ticker": "SIVE",
+      "domain": "AI photonics, CPO and external light sources",
+      "benchmark": "SOXX",
+      "role": "external laser / silicon-photonics watchlist"
+    },
+    {
+      "ticker": "POET",
+      "domain": "AI photonics, CPO and external light sources",
+      "benchmark": "SOXX",
+      "role": "optical engine packaging watchlist"
+    },
+    {
+      "ticker": "AXTI",
+      "domain": "Advanced packaging materials and package-level power integrity",
+      "benchmark": "SOXX",
+      "role": "compound semiconductor substrate watchlist"
+    },
+    {
+      "ticker": "009150.KS",
+      "domain": "Advanced packaging materials and package-level power integrity",
+      "benchmark": "SOXX",
+      "role": "silicon capacitor and glass-core substrate anchor"
+    },
+    {
+      "ticker": "SMTOY",
+      "domain": "Advanced packaging materials and package-level power integrity",
+      "benchmark": "SOXX",
+      "role": "glass-core material partner watchlist"
+    },
+    {
+      "ticker": "AMKR",
+      "domain": "Advanced packaging materials and package-level power integrity",
+      "benchmark": "SOXX",
+      "role": "advanced packaging / OSAT anchor"
+    },
+    {
+      "ticker": "MKSI",
+      "domain": "Advanced packaging materials and package-level power integrity",
+      "benchmark": "SOXX",
+      "role": "process equipment and advanced manufacturing exposure"
+    },
+    {
+      "ticker": "WDC",
+      "domain": "Inference memory, storage and controller bottlenecks",
+      "benchmark": "SOXX",
+      "role": "storage anchor"
+    },
+    {
+      "ticker": "STX",
+      "domain": "Inference memory, storage and controller bottlenecks",
+      "benchmark": "SOXX",
+      "role": "storage watchlist"
+    },
+    {
+      "ticker": "SIMO",
+      "domain": "Inference memory, storage and controller bottlenecks",
+      "benchmark": "SOXX",
+      "role": "controller watchlist"
+    },
+    {
+      "ticker": "SNDK",
+      "domain": "Inference memory, storage and controller bottlenecks",
+      "benchmark": "SOXX",
+      "role": "NAND / storage watchlist; listed-security status must be verified"
+    },
+    {
+      "ticker": "RPI",
+      "domain": "Physical AI, robotics components and edge hardware",
+      "benchmark": "SOXX",
+      "role": "robotics / edge hardware watchlist"
+    },
+    {
+      "ticker": "SYM",
+      "domain": "Physical AI, robotics components and edge hardware",
+      "benchmark": "SOXX",
+      "role": "warehouse automation and robotics watchlist"
+    },
+    {
+      "ticker": "TER",
+      "domain": "Physical AI, robotics components and edge hardware",
+      "benchmark": "SOXX",
+      "role": "semiconductor test and collaborative robotics anchor"
+    },
+    {
+      "ticker": "ISRG",
+      "domain": "Physical AI, robotics components and edge hardware",
+      "benchmark": "SOXX",
+      "role": "surgical robotics anchor"
+    },
+    {
+      "ticker": "ROK",
+      "domain": "Physical AI, robotics components and edge hardware",
+      "benchmark": "SOXX",
+      "role": "industrial automation anchor"
+    }
+  ]
+}
