@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template only: local legal-audio ASR stack. It is never installed automatically.
+  Replace every REPLACE_ME value, then have a human copy it into
+  ~/Library/LaunchAgents/ and load it with launchctl.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.information-gain.live-tv-asr</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>REPLACE_ME/node</string>
+    <string>--env-file-if-exists=.env</string>
+    <string>scripts/asr-stack.js</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>REPLACE_ME_REPOSITORY_PATH</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- launchd does not inherit an interactive Homebrew PATH. Keep the
+         executable paths explicit so preflight and capture use the same tools. -->
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>FFMPEG_COMMAND</key>
+    <string>REPLACE_ME_FFMPEG_COMMAND</string>
+    <key>FFPROBE_COMMAND</key>
+    <string>REPLACE_ME_FFPROBE_COMMAND</string>
+    <key>ASR_SOURCE_CONFIG</key>
+    <string>config/asr-sources.json</string>
+    <!-- Put DASHSCOPE_API_KEY, ASR_API_BASE, and optional
+         ASR_API_USERNAME/PASSWORD in the repo-local .env (mode 600) instead
+         of here. The stack uses the first-party FunASR realtime adapter. -->
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>REPLACE_ME_REPOSITORY_PATH/logs/live-tv-asr.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>REPLACE_ME_REPOSITORY_PATH/logs/live-tv-asr.err.log</string>
+</dict>
+</plist>

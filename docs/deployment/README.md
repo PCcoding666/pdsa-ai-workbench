@@ -87,3 +87,36 @@ UNIVERSE_FILE="$PWD/config/auto-research-universe.json" node scripts/research-en
 
 The engine never places orders and never moves money. Its terminal output is a
 **queue for human judgment**.
+
+## Optional local live-TV ASR service (macOS)
+
+The companion template
+[`com.information-gain.asr.plist.example`](com.information-gain.asr.plist.example)
+runs `scripts/asr-stack.js`. It supervises the local capture and ASR processes;
+it does **not** log in to a website, open Chrome, bypass DRM, or install audio
+drivers. Read the full setup and human routing gate in [`README.md`](../../README.md#本机合法直播音频--asr-事件流).
+
+Only after preflight is `READY` and a human has verified a legal local playback
+route, may a human install the template:
+
+```bash
+mkdir -p "$PWD/logs"
+# Use Node 20.6.0+ because the template loads the repository-local .env.
+node --version
+cp docs/deployment/com.information-gain.asr.plist.example \
+  ~/Library/LaunchAgents/com.information-gain.live-tv-asr.plist
+# Edit the copied file: node path, repo path, and local ffmpeg/ffprobe paths.
+# `which ffmpeg` and `which ffprobe` should be copied literally; launchd does
+# not inherit your interactive Homebrew PATH. The template loads the
+# repository-local `.env`; put DASHSCOPE_API_KEY and any API credentials there,
+# then restrict it with `chmod 600 .env`. It uses the repository's first-party
+# FunASR realtime adapter and does not invoke local Whisper.
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.information-gain.live-tv-asr.plist
+```
+
+Stop and remove it without touching audio/data files:
+
+```bash
+launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/com.information-gain.live-tv-asr.plist
+rm ~/Library/LaunchAgents/com.information-gain.live-tv-asr.plist
+```

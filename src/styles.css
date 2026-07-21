@@ -2057,6 +2057,22 @@ button {
   line-height: 1.35;
 }
 
+.asr-capture-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 10px;
+  color: #52636f;
+  font-size: 11px;
+}
+
+.asr-capture-meta span {
+  padding: 4px 7px;
+  background: #eef5f2;
+  border: 1px solid #d8e9e1;
+  border-radius: 999px;
+}
+
 .event-actions {
   display: flex;
   align-items: center;

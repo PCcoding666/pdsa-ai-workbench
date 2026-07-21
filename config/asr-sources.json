@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "defaults": {
+    "apiBase": "http://127.0.0.1:3002",
+    "language": "en",
+    "segmentSeconds": 5,
+    "asrBackend": "funasr-realtime",
+    "asrModel": "fun-asr-realtime",
+    "pollMs": 500,
+    "minAgeMs": 750,
+    "stableCheckMs": 250,
+    "signalThresholdDb": -55,
+    "textDedupeWindowMs": 600000,
+    "maxRetries": 3,
+    "deviceName": "BlackHole 2ch"
+  },
+  "sources": [
+    {
+      "id": "bloomberg-tv",
+      "name": "Bloomberg TV",
+      "enabled": true,
+      "priority": 1,
+      "deviceName": "BlackHole 2ch"
+    },
+    {
+      "id": "cnbc-live-tv",
+      "name": "CNBC Live TV",
+      "enabled": false,
+      "priority": 2,
+      "deviceName": "BlackHole 2ch"
+    }
+  ]
+}

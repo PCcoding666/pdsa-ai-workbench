@@ -2,7 +2,7 @@
 
 个人美股信息优势与 AI 前沿情报工作台。当前项目从原 PDSA AI 简报扩展为四条主线：
 
-- 实时美股信息获取：源注册表、事件流、后续接直播 ASR。
+- 实时美股信息获取：源注册表、事件流，以及本机合法直播音频 ASR。
 - 美股自动研究：研究队列、证据链 memo 骨架、后续接 deep research 与自省循环。
 - AI 前沿：保留 RSS 聚合，并逐步映射到美股标的和市场影响。
 - 政治持仓：追踪特朗普与美国行政分支官员 OGE 公开交易披露，作为政策、利益冲突和市场叙事信号。
@@ -24,7 +24,7 @@ npm run dev:all
 后端新增第一阶段承载层：
 
 - `GET /api/source-registry`：统一源注册表，包含 Bloomberg TV、CNBC、Fox Business、SEC、公司 IR、宏观源、免费媒体和 AI RSS 源。
-- `GET /api/events?limit=60`：统一事件流。目前会合并已保存转录事件与 AI RSS 事件；后续直播 ASR 会写入同一个事件模型。
+- `GET /api/events?limit=60`：统一事件流，合并已保存的直播转录事件与 AI RSS 事件。
 - `GET /api/events?refresh=1`：刷新 AI RSS 后重建事件流。
 - `POST /api/events/transcripts`：写入一段直播 ASR 转录，服务端会生成带来源、时间戳、ticker、主题和证据片段的事件。
 - `GET /api/research/queue`：读取研究队列。
@@ -203,66 +203,24 @@ SERENITY_ARCHIVE_FILE="/Users/chengpeng/Downloads/serenity_2026-06-01.json"
 
 自定义候选卡会保存到 `data/serenity-thesis-cards.json`。
 
-## Bloomberg ASR Worker
+## 本机合法直播音频 → ASR 事件流
 
-第一阶段 ASR worker 已落地为“音频切片目录 -> Whisper 转录 -> 事件流”的链路。音频隔离工具只要把 Bloomberg 音频切成文件放进目录，worker 就会转录并调用 `POST /api/events/transcripts`。
+正式的安装、权限、BlackHole/Multi-Output 路由、Bloomberg/CNBC 配置、日常启动、停止、故障恢复和验收命令以根目录 [`README.md`](README.md#本机合法直播音频--asr-事件流) 为唯一操作手册。链路只处理用户在 Chrome 中已经合法播放、并主动路由到本机虚拟音频输入的声音；绝不登录网站、读取 cookie、下载/提取视频或绕过 DRM。
 
-目录约定：
-
-```text
-audio/
-  bloomberg-tv/
-    incoming/   # 新音频切片
-    processed/  # 已转录
-    failed/     # 转录或上报失败
-    logs/       # asr-worker.jsonl 和 whisper 输出
-```
-
-运行 Bloomberg worker：
+不要把 AVFoundation 设备索引写死到命令或文档中。运行 `npm run asr:preflight` 后，系统会按 `config/asr-sources.json` 中的设备名解析当前索引，并验证该设备是 loopback 输入。默认 ASR 是百炼 `fun-asr-realtime`：仅在 Git 忽略的 `.env` 中设置 `DASHSCOPE_API_KEY`，不会安装或调用本地 Whisper。默认运行 Bloomberg；CNBC 需要用户合法登录并使用独立 loopback，或与 Bloomberg 分时使用同一个 BlackHole 设备。
 
 ```bash
-ASR_SOURCE_ID="bloomberg-tv" \
-ASR_API_BASE="http://localhost:3002" \
+npm run asr:preflight
+npm run capture:bloomberg
 npm run asr:bloomberg
+# 或监督所有已启用且设备不冲突的来源
+npm run asr:stack
 ```
 
-如果 Whisper 首次下载模型需要走本机代理：
+离线回归（不需要账号、麦克风、音频或模型）使用：
 
 ```bash
-http_proxy="http://127.0.0.1:7890" \
-https_proxy="http://127.0.0.1:7890" \
-ASR_MODEL="base" \
-npm run asr:bloomberg
-```
-
-列出本机可录音设备：
-
-```bash
-npm run audio:list
-```
-
-按 AVFoundation 设备索引切片录音：
-
-```bash
-SOURCE_ID="bloomberg-tv" \
-AUDIO_DEVICE_INDEX="2" \
-SEGMENT_SECONDS=30 \
-scripts/capture-audio.sh
-```
-
-当前机器尚未检测到 BlackHole / Loopback 这类虚拟音频设备。要隔离多个直播源，需要先把每个直播源路由到不同音频设备，再分别运行 capture/ASR worker。
-
-### ASR Worker 自测
-
-worker 支持 `--once` 单次扫描和 `ASR_BACKEND=sidecar`，方便不用跑 Whisper 时测试链路：
-
-```bash
-ASR_BACKEND=sidecar \
-ASR_ONCE=1 \
-ASR_MIN_AGE_MS=0 \
-ASR_WATCH_DIR="/tmp/ig-asr-test/incoming" \
-ASR_API_BASE="http://localhost:3002" \
-node scripts/asr-worker.js
+npm run test:asr
 ```
 
 ## OGE 原始文件验证链

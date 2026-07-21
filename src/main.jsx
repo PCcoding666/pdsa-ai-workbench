@@ -39,6 +39,7 @@ const routes = [
 
 const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:3002' : '';
 const briefingCategories = ['模型', '应用', '投融资', '生态'];
+const REALTIME_POLL_MS = 8000;
 
 const defaultSubscriptions = [
   { name: '海外模型厂商发布 + 价格变化', mode: '一句话', cadence: '每日 08:30' },
@@ -634,9 +635,11 @@ function RealtimeFlow() {
   const [message, setMessage] = useState('');
   const [activeType, setActiveType] = useState('all');
 
-  const loadRealtime = async ({ refresh = false } = {}) => {
-    setState('loading');
-    setMessage('');
+  const loadRealtime = async ({ refresh = false, background = false } = {}) => {
+    if (!background) {
+      setState('loading');
+      setMessage('');
+    }
     try {
       const [sourcePayload, eventPayload] = await Promise.all([
         apiFetch('/api/source-registry'),
@@ -646,6 +649,10 @@ function RealtimeFlow() {
       setEventsData(eventPayload);
       setState('ready');
     } catch (error) {
+      if (background) {
+        setMessage('自动刷新失败，当前事件流仍保留上次成功结果。');
+        return;
+      }
       setState('error');
       setMessage('实时事件接口暂不可用，请检查后端服务。');
     }
@@ -653,6 +660,8 @@ function RealtimeFlow() {
 
   useEffect(() => {
     loadRealtime();
+    const poller = window.setInterval(() => loadRealtime({ background: true }), REALTIME_POLL_MS);
+    return () => window.clearInterval(poller);
   }, []);
 
   const addToResearchQueue = async (event) => {
@@ -728,6 +737,13 @@ function RealtimeFlow() {
                     <span>{formatPercent(event.score?.confidence)}</span>
                   </div>
                 </div>
+                {event.transcript && (
+                  <div className="asr-capture-meta">
+                    <span>ASR · {event.asrBackend || 'unknown backend'}</span>
+                    <span>Worker · {event.workerId || 'unknown worker'}</span>
+                    <span>Audio · {formatAudioWindow(event.audioWindow)}</span>
+                  </div>
+                )}
                 <div className="event-actions">
                   <span className={event.verification?.needsVerification ? 'verify-pill warning' : 'verify-pill'}>
                     {event.verification?.needsVerification ? '待交叉验证' : '已验证'}
@@ -788,6 +804,12 @@ function RealtimeFlow() {
       </div>
     </section>
   );
+}
+
+function formatAudioWindow(window) {
+  if (!window?.start || !window?.end) return 'window unavailable';
+  const duration = Number(window.durationSeconds);
+  return Number.isFinite(duration) ? `${formatEventTime(window.start)} · ${duration}s` : formatEventTime(window.start);
 }
 
 function ResearchQueue() {

@@ -2,7 +2,7 @@
 
 个人美股信息优势与 AI 前沿情报工作台。当前项目从原 PDSA AI 简报扩展为三条线：
 
-- 实时美股信息获取：源注册表、事件流、后续接直播 ASR。
+- 实时美股信息获取：源注册表、事件流，以及本机合法直播音频 ASR。
 - 美股自动研究：研究队列、证据链 memo 骨架、后续接 deep research 与自省循环。
 - AI 前沿：保留 RSS 聚合，并逐步映射到美股标的和市场影响。
 - 政治持仓：追踪特朗普与美国行政分支官员 OGE 公开交易披露，作为政策/利益冲突/市场叙事信号。
@@ -24,7 +24,7 @@ npm run dev:all
 后端新增第一阶段承载层：
 
 - `GET /api/source-registry`：统一源注册表，包含 Bloomberg TV、CNBC、Fox Business、SEC、公司 IR、宏观源、免费媒体和 AI RSS 源。
-- `GET /api/events?limit=60`：统一事件流。目前会合并已保存转录事件与 AI RSS 事件；后续直播 ASR 会写入同一个事件模型。
+- `GET /api/events?limit=60`：统一事件流，合并已保存的直播转录事件与 AI RSS 事件。
 - `GET /api/events?refresh=1`：刷新 AI RSS 后重建事件流。
 - `POST /api/events/transcripts`：写入一段直播 ASR 转录，服务端会生成带来源、时间戳、ticker、主题、证据片段的事件。
 - `GET /api/research/queue`：读取研究队列。
@@ -203,67 +203,152 @@ SERENITY_ARCHIVE_FILE="/Users/chengpeng/Downloads/serenity_2026-06-01.json"
 
 自定义候选卡会保存到 `data/serenity-thesis-cards.json`。
 
-## Bloomberg ASR Worker
+## 本机合法直播音频 → ASR 事件流
 
-第一阶段 ASR worker 已落地为“音频切片目录 -> Whisper 转录 -> 事件流”的链路。音频隔离工具只要把 Bloomberg 音频切成文件放进目录，worker 就会转录并调用 `POST /api/events/transcripts`。
+这条链路只处理**用户已经在本机 Chrome 中合法播放、并主动路由到本地虚拟音频输入的声音**。它不会登录网站、读取 cookie、下载/提取视频、绕过 DRM/付费墙/地区限制，也不会执行交易或资金操作。Bloomberg TV 是默认优先源；CNBC Live TV 在用户已合法登录并完成独立路由后同样支持。
 
-目录约定：
+### 从零安装
+
+1. 安装项目依赖并创建本地环境文件。日常命令依赖 Node 的 `--env-file-if-exists`，因此需要 **Node 20.6.0 或更高版本**：
+
+```bash
+node --version
+npm install
+cp .env.example .env
+```
+
+2. 配置百炼 FunASR realtime。复制模板后，仅在 Git 忽略的 `.env` 填入你自己的 DashScope API key；默认模型、英文和 5 秒切片已经配置好。它不会安装、下载或调用本地 Whisper：
+
+```bash
+chmod 600 .env
+# 用编辑器打开 .env，只填写这一项的值，不要提交该文件
+DASHSCOPE_API_KEY=
+```
+
+运行脚本会把 `.env` 的值按**字面量**读取，不会展开 `~`、`$HOME` 或 `$(...)`。正式适配器通过百炼官方 WebSocket 发送已捕获的 16 kHz 单声道 PCM 音频，stdout 只输出最终英文转录；它不会写入、显示或记录 API key。
+
+3. 安装虚拟音频驱动。优先选择 BlackHole 2ch；若安装命令出现管理员密码或 macOS 扩展批准提示，这是唯一需要人类完成的安装门槛：
+
+```bash
+brew install --cask blackhole-2ch
+```
+
+若安装器提示重启，先重启 macOS，使新音频驱动被 Core Audio 枚举；之后由 FFmpeg/AVFoundation 重新列出 `BlackHole 2ch`。这不是绕过 macOS 安全策略的步骤。
+
+4. 打开 **Audio MIDI Setup（音频 MIDI 设置）**，点击 `+` → **Create Multi-Output Device**，勾选本机扬声器和 `BlackHole 2ch`。把 Chrome/系统输出切到该 Multi-Output Device；这样你仍能听见声音，同时 BlackHole 成为录音输入。首次实际采集时若 macOS 要求权限，批准终端/Codex 的麦克风（音频输入）权限。
+
+5. 在 `config/asr-sources.json` 中确认 `deviceName` 与 Audio MIDI Setup 显示的名称**逐字一致**。不要手填索引：preflight 会枚举 AVFoundation 设备并把真实索引写进被 Git 忽略的 `audio/asr-runtime.json`。
+
+### 预检与启动
+
+先在一个终端启动 API：
+
+```bash
+npm run server
+```
+
+另一个终端运行预检：
+
+```bash
+npm run asr:preflight
+```
+
+如只需要验证百炼凭据与 realtime WebSocket（发送 1 秒静音探针，不发送任何直播内容），运行：
+
+```bash
+npm run asr:funasr:check
+```
+
+只验证一个来源（包括默认禁用的 CNBC）时可显式选择它：
+
+```bash
+npm run asr:preflight -- --source cnbc-live-tv
+```
+
+它会明确报告：
+
+1. `ffmpeg`/`ffprobe` 是否可用；
+2. 仓库内置的百炼 FunASR realtime 适配器和凭据是否已检测到（不会显示密钥）；
+3. 可用 AVFoundation loopback 输入和解析后的索引；
+4. 本地 API 的公开健康检查和受保护事件接口是否可达；若启用了 HTTP Basic Auth，会用 `ASR_API_USERNAME`/`ASR_API_PASSWORD`（未设置时回退 `APP_USERNAME`/`APP_PASSWORD`）验证认证是否真正可用；
+5. 已配置输入上是否存在非静音信号；
+6. 仍需要的唯一人工步骤。
+
+若需要让脚本在未就绪时返回非零状态，使用：
+
+```bash
+ASR_PREFLIGHT_STRICT=1 npm run asr:preflight
+```
+
+当 Bloomberg 已在 Chrome 中合法播放且 preflight 显示 `READY` 后，可在两个终端分别启动：
+
+```bash
+npm run capture:bloomberg
+npm run asr:bloomberg
+```
+
+或使用监督器一次启动所有已启用且拥有**不同** loopback 输入的来源：
+
+```bash
+npm run asr:stack
+```
+
+监督器会独立重启单个来源的 capture/worker；一个来源失败不会停止其他来源。若两个来源配置到同一个 BlackHole 索引，监督器会只阻止第二个 capture，避免把两个频道误标成不同来源。
+
+### Bloomberg 与 CNBC 配置
+
+`config/asr-sources.json` 是非敏感、可提交的源配置，包含来源 ID/名称、设备名称、英文、片段秒数、API 地址、重试和去重窗口。默认只启用 `bloomberg-tv`。要启用 CNBC：
+
+1. 先在 Chrome 中**合法登录** CNBC Live TV（本项目不会替你登录或检查账户）；
+2. 给 CNBC 配置一个与 Bloomberg 不同的 loopback 输入；
+3. 把 `cnbc-live-tv.enabled` 改为 `true`，并把它的 `deviceName` 改为对应输入；
+4. 再运行 `npm run asr:preflight` 和 `npm run asr:stack`。
+
+如果只有一个 BlackHole 2ch，单次只运行一个频道：先停止 Bloomberg capture/worker，把 Chrome 输出切到目标频道，再运行：
+
+```bash
+npm run capture:cnbc
+npm run asr:cnbc
+```
+
+### 运行数据、可靠性与排障
+
+每个来源的运行目录都在 Git 忽略的 `audio/<source-id>/` 下：
 
 ```text
-audio/
-  bloomberg-tv/
-    incoming/   # 新音频切片
-    processed/  # 已转录
-    failed/     # 转录或上报失败
-    logs/       # asr-worker.jsonl 和 whisper 输出
+audio/<source-id>/
+  staging/     # ffmpeg 正在写入的 .wav.part；不会被 worker 读取
+  incoming/    # 已二次稳定检查并原子 rename 的 WAV
+  processed/   # 已转录并成功上报的音频及可选 sidecar（默认保留 7 天）
+  failed/      # 达到重试上限的音频、sidecar 与 .error.json（默认保留 30 天）
+  logs/        # capture/worker JSONL、health.json、dedupe.json/.jsonl 与诊断状态（轮转）
 ```
 
-运行 Bloomberg worker：
+- Capture 先写 `staging/*.wav.part`，确认稳定后原子发布到 `incoming/*.wav`；worker 再做一次稳定检查。每个实际 loopback 设备都有原子锁，因此不能被两个来源同时错误标记；陈旧 PID 锁会自动回收。
+- worker 用音频 SHA-256 去重，并对同来源相同文本使用默认 10 分钟窗口去重。API 事件 ID 由来源和音频哈希确定，重试或崩溃恢复只会 upsert 同一事件；去重状态默认保留 30 天、最多各 50,000 条，避免长期无界增长。
+- 事件中的 `audioFile` 是形如 `audio/<source-id>/processed/<segment>.wav` 的逻辑片段引用，不是本机绝对路径，也不是下载端点；音频本体不会通过事件 API 暴露。
+- ASR 与 API 失败会进行默认 3 次指数退避重试；HTTP 请求默认 20 秒超时。仍失败才进入 `failed/`，原因在同名 `.error.json` 和 JSONL 中。
+- FunASR realtime 适配器只在内存中处理 PCM 和最终文本，不会在仓库写入云端中间结果；JSONL 会记录 `processingLatencyMs` 和 `segmentToEventLatencyMs`，health 文件记录最后事件与错误。`Ctrl-C` 会停止 capture/worker/其 ASR 子进程，并保留尚未完成的输入供下次启动恢复。
+- 为使服务可以长期运行，成功音频默认保留 7 天、失败隔离默认保留 30 天；每小时清理一次。`capture.jsonl`、`asr-worker.jsonl` 和 `asr-stack.jsonl` 默认每个 10 MiB 轮转、保留 5 个旧文件。可在忽略的 `.env` 以 `ASR_AUDIO_RETENTION_DAYS`、`ASR_FAILED_RETENTION_DAYS`、`ASR_LOG_MAX_BYTES`、`ASR_LOG_MAX_ROTATED_FILES` 调整；把保留天数设为 `0` 即交由外部归档/清理。
+- 查看设备而不创建目录：`npm run audio:list`。查看实时健康文件：`cat audio/<source-id>/logs/{capture-health,health}.json`。
+- 修复原因后，可把 `failed/` 中原始音频（以及 sidecar 测试文本，如有）移回对应 `incoming/` 让 worker 再次处理；不要移动 `.error.json`。
+- 如果 `node --version`、`ffmpeg -version` 或 `ffprobe -version` 本身卡住/被 macOS 拒绝，先修复受信任的运行时安装后再启动链路。不要通过关闭 SIP、绕过 Gatekeeper 或移除系统安全策略解决；preflight 在工具无法执行时会保持 `NOT READY`。
+
+百炼 FunASR realtime 是默认 ASR 后端；它只处理你已经合法播放并主动路由到 BlackHole 的本机系统音频。首次配置前请确认你同意该音频被发送至你的百炼账户。参考 [百炼 Fun-ASR realtime WebSocket 文档](https://help.aliyun.com/zh/model-studio/fun-asr-realtime-websocket-api)。
+
+### 验证、界面与停止
+
+离线自动化验证不需要网络、账号、麦克风或本地模型：
 
 ```bash
-ASR_SOURCE_ID="bloomberg-tv" \
-ASR_API_BASE="http://localhost:3002" \
-npm run asr:bloomberg
+npm run test:asr
+npm test
+npm run build
 ```
 
-如果 Whisper 首次下载模型需要走本机代理：
+端到端事件路径是：`audio segment → worker → POST /api/events/transcripts → GET /api/events → /realtime-flow`。事件 API 会拒绝缺少 `sourceId`、`sourceName`、时间戳、转录、音频窗口/文件、ASR backend 或 worker ID 的请求；所有直播转录始终标记“待交叉验证”。常规 `GET /api/events` 会优先返回已存的直播转录，避免它等待 RSS 刷新或被较新的 RSS 条目挤出页面；`/realtime-flow` 每 8 秒轮询该接口，转录卡会显示 ASR、worker 与音频窗口。
 
-```bash
-http_proxy="http://127.0.0.1:7890" \
-https_proxy="http://127.0.0.1:7890" \
-ASR_MODEL="base" \
-npm run asr:bloomberg
-```
-
-列出本机可录音设备：
-
-```bash
-npm run audio:list
-```
-
-按 AVFoundation 设备索引切片录音：
-
-```bash
-SOURCE_ID="bloomberg-tv" \
-AUDIO_DEVICE_INDEX="2" \
-SEGMENT_SECONDS=30 \
-scripts/capture-audio.sh
-```
-
-当前机器尚未检测到 BlackHole / Loopback 这类虚拟音频设备。要隔离多个直播源，需要先把每个直播源路由到不同音频设备，再分别运行 capture/ASR worker。
-
-### ASR Worker 自测
-
-worker 支持 `--once` 单次扫描和 `ASR_BACKEND=sidecar`，方便不用跑 Whisper 时测试链路：
-
-```bash
-ASR_BACKEND=sidecar \
-ASR_ONCE=1 \
-ASR_MIN_AGE_MS=0 \
-ASR_WATCH_DIR="/tmp/ig-asr-test/incoming" \
-ASR_API_BASE="http://localhost:3002" \
-node scripts/asr-worker.js
-```
+前台运行时使用 `Ctrl-C` 停止 capture、worker 或 stack；停止 API 也使用其终端的 `Ctrl-C`。可选的 launchd 模板在 [`docs/deployment/com.information-gain.asr.plist.example`](docs/deployment/com.information-gain.asr.plist.example)，从不自动安装；安装与卸载命令见 [`docs/deployment/README.md`](docs/deployment/README.md)。
 
 ## OGE 原始文件验证链
 

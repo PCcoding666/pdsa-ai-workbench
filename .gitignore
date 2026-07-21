@@ -3,5 +3,9 @@ dist
 data
 .env
 .env.*
+!.env.example
 .DS_Store
 *.log
+audio/
+.asr/
+.venv-asr/

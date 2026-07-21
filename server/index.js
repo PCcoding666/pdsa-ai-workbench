@@ -25,6 +25,7 @@ import {
   mergeSerenityDomainWatchlist,
 } from './serenity-domain-scheduler.js';
 import { buildSerenityCompanyAnalysisMock } from './serenity-company-analysis.js';
+import { selectRealtimeEvents, shouldServeStoredLiveEventsImmediately } from './realtime-events.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -569,6 +570,7 @@ let cache = {
   expiresAt: 0,
   payload: null,
 };
+let briefingRefreshPromise = null;
 
 let officialHoldingsCache = {
   generatedAt: null,
@@ -620,6 +622,19 @@ app.get('/api/source-registry', (req, res) => {
 app.get('/api/events', async (req, res) => {
   const limit = clampNumber(req.query.limit, 1, 120, 60);
   const forceRefresh = req.query.refresh === '1';
+  const storedOnly = req.query.stored === '1';
+
+  if (storedOnly) {
+    const events = getStoredEvents().slice(0, limit);
+    res.json({
+      generatedAt: new Date().toISOString(),
+      events,
+      sourceHealth: { total: 0, ok: 0, failed: 0, failures: [] },
+      summary: summarizeEvents(events),
+      mode: 'stored',
+    });
+    return;
+  }
 
   try {
     const payload = await getRealtimeEvents({ limit, forceRefresh });
@@ -1739,6 +1754,20 @@ function parseDollarAmount(value) {
 }
 
 async function getRealtimeEvents({ limit = 60, forceRefresh = false } = {}) {
+  const storedEvents = getStoredEvents();
+  const hasCachedBriefing = Boolean(cache.payload && cache.expiresAt > Date.now());
+  if (shouldServeStoredLiveEventsImmediately({ storedEvents, hasCachedBriefing, forceRefresh })) {
+    refreshBriefingInBackground();
+    const events = selectRealtimeEvents({ storedEvents, generatedEvents: [], limit });
+    return {
+      generatedAt: new Date().toISOString(),
+      events,
+      sourceHealth: { total: rssSources.length, ok: 0, failed: 0, failures: [], refreshing: true },
+      summary: summarizeEvents(events),
+      warning: 'RSS refresh is running in the background; persisted live transcript events are current.',
+    };
+  }
+
   let briefingPayload = null;
   let briefingError = '';
   try {
@@ -1748,10 +1777,7 @@ async function getRealtimeEvents({ limit = 60, forceRefresh = false } = {}) {
   }
 
   const aiEvents = (briefingPayload?.items || []).map((item) => buildEventFromBriefingItem(item, briefingPayload.generatedAt));
-  const storedEvents = getStoredEvents();
-  const events = dedupeEvents([...storedEvents, ...aiEvents])
-    .sort((a, b) => new Date(b.publishedAt || b.createdAt || 0).getTime() - new Date(a.publishedAt || a.createdAt || 0).getTime())
-    .slice(0, limit);
+  const events = selectRealtimeEvents({ storedEvents, generatedEvents: aiEvents, limit });
 
   const sourceHealth = briefingPayload?.sourceHealth || {
     total: rssSources.length,
@@ -1767,6 +1793,13 @@ async function getRealtimeEvents({ limit = 60, forceRefresh = false } = {}) {
     summary: summarizeEvents(events),
     warning: briefingError,
   };
+}
+
+function refreshBriefingInBackground() {
+  if (briefingRefreshPromise) return;
+  briefingRefreshPromise = getBriefing()
+    .catch(() => null)
+    .finally(() => { briefingRefreshPromise = null; });
 }
 
 function getStoredEvents() {
@@ -1838,9 +1871,24 @@ function createTranscriptEvent(input) {
   const sourceId = cleanText(input.sourceId || input.source || '');
   const source = getSourceRegistry().find((item) => item.id === sourceId || item.name === sourceId);
   const transcript = normalizeMultilineText(input.transcript || input.text || input.rawText || '');
-  if (!transcript) throw new Error('Transcript text is required');
+  const timestamp = normalizeDate(input.timestamp || input.publishedAt);
+  const sourceName = source?.name || cleanText(input.sourceName || input.source || 'Manual Transcript');
+  const audioWindow = normalizeAudioWindow(input.audioWindow, timestamp, input.timeWindow);
+  const audioFile = truncate(cleanText(input.audioFile || input.sourceFile || ''), 400);
+  const asrBackend = truncate(cleanText(input.asrBackend || ''), 80);
+  const workerId = truncate(cleanText(input.workerId || ''), 120);
+  const missingFields = [
+    ['sourceId', sourceId],
+    ['sourceName', cleanText(input.sourceName)],
+    ['timestamp', timestamp],
+    ['transcript', transcript],
+    ['audioWindow', audioWindow],
+    ['audioFile', audioFile],
+    ['asrBackend', asrBackend],
+    ['workerId', workerId],
+  ].filter(([, value]) => !value).map(([name]) => name);
+  if (missingFields.length) throw new Error(`Transcript event requires: ${missingFields.join(', ')}`);
 
-  const timestamp = normalizeDate(input.timestamp || input.publishedAt) || new Date().toISOString();
   const title = truncate(cleanText(input.title || summarizeTranscriptTitle(transcript)), 160);
   const tickers = extractTickers(`${title} ${transcript}`);
   const themes = uniqueStrings([...(Array.isArray(input.themes) ? input.themes : []), ...inferMarketThemes(`${title} ${transcript}`)]).slice(0, 8);
@@ -1851,10 +1899,18 @@ function createTranscriptEvent(input) {
     publishedAt: timestamp,
     source: {
       id: source?.id || sourceId || 'manual-transcript',
-      name: source?.name || cleanText(input.sourceName || input.source || 'Manual Transcript'),
+      name: sourceName,
       type: source?.type || 'live_tv',
       trustTier: source?.trustTier || 'secondary_interpretation',
     },
+    sourceId: source?.id || sourceId || 'manual-transcript',
+    sourceName,
+    timestamp,
+    transcript,
+    audioWindow,
+    audioFile,
+    asrBackend,
+    workerId,
     title,
     summary: truncate(cleanText(input.summary || transcript), 260),
     rawText: transcript,
@@ -1872,10 +1928,11 @@ function createTranscriptEvent(input) {
         type: 'transcript_segment',
         text: truncate(transcript, 600),
         timestamp,
-        timeWindow: truncate(cleanText(input.timeWindow || ''), 80),
-        audioFile: truncate(cleanText(input.audioFile || input.sourceFile || ''), 400),
-        asrBackend: truncate(cleanText(input.asrBackend || ''), 80),
-        workerId: truncate(cleanText(input.workerId || ''), 120),
+        timeWindow: truncate(cleanText(input.timeWindow || formatAudioWindow(audioWindow)), 80),
+        audioWindow,
+        audioFile,
+        asrBackend,
+        workerId,
       },
     ],
     verification: {
@@ -1905,6 +1962,7 @@ function normalizeEventInput(input) {
   const tickers = normalizeStringArray(input.tickers).concat(extractTickers(eventText));
   const themes = normalizeStringArray(input.themes).concat(inferMarketThemes(eventText));
 
+  const asrMetadata = normalizeAsrMetadata(input, { sourceId, sourceName, timestamp: publishedAt, rawText });
   return {
     id: cleanText(input.id || `event:${crypto.createHash('sha1').update(`${sourceId}:${publishedAt}:${title || rawText}`).digest('hex').slice(0, 16)}`),
     createdAt: normalizeDate(input.createdAt) || new Date().toISOString(),
@@ -1926,6 +1984,7 @@ function normalizeEventInput(input) {
     evidence: normalizeEvidence(input.evidence, publishedAt, rawText),
     verification: normalizeVerification(input.verification),
     score: normalizeScore(input.score, eventText),
+    ...asrMetadata,
   };
 }
 
@@ -1946,12 +2005,14 @@ function normalizeEvidence(input, timestamp, fallbackText) {
         return { type: 'note', text: truncate(cleanText(item), 500), timestamp };
       }
       if (!item || typeof item !== 'object') return null;
+      const audioWindow = normalizeAudioWindow(item.audioWindow, timestamp, item.timeWindow);
       return {
         type: truncate(cleanText(item.type || 'source_excerpt'), 60),
         text: truncate(cleanText(item.text || item.excerpt || item.summary || ''), 700),
         timestamp: normalizeDate(item.timestamp) || timestamp,
         url: truncate(cleanText(item.url || ''), 400),
         timeWindow: truncate(cleanText(item.timeWindow || ''), 80),
+        ...(audioWindow ? { audioWindow } : {}),
         audioFile: truncate(cleanText(item.audioFile || ''), 400),
         asrBackend: truncate(cleanText(item.asrBackend || ''), 80),
         workerId: truncate(cleanText(item.workerId || ''), 120),
@@ -1961,6 +2022,42 @@ function normalizeEvidence(input, timestamp, fallbackText) {
 
   if (normalized.length) return normalized.slice(0, 6);
   return [{ type: 'source_excerpt', text: truncate(cleanText(fallbackText || ''), 500), timestamp }];
+}
+
+function normalizeAsrMetadata(input, { sourceId, sourceName, timestamp, rawText }) {
+  const hasTranscriptMetadata = Boolean(input.transcript || input.audioWindow || input.audioFile || input.sourceFile || input.asrBackend || input.workerId);
+  if (!hasTranscriptMetadata) return {};
+  const audioWindow = normalizeAudioWindow(input.audioWindow, timestamp, input.timeWindow);
+  return {
+    sourceId,
+    sourceName,
+    timestamp,
+    transcript: normalizeMultilineText(input.transcript || rawText),
+    ...(audioWindow ? { audioWindow } : {}),
+    audioFile: truncate(cleanText(input.audioFile || input.sourceFile || ''), 400),
+    asrBackend: truncate(cleanText(input.asrBackend || ''), 80),
+    workerId: truncate(cleanText(input.workerId || ''), 120),
+  };
+}
+
+function normalizeAudioWindow(value, timestamp, fallbackTimeWindow = '') {
+  const raw = value && typeof value === 'object' ? value : {};
+  const start = normalizeDate(raw.start) || normalizeDate(timestamp);
+  const end = normalizeDate(raw.end);
+  const durationSeconds = Number(raw.durationSeconds);
+  if (start && end && Number.isFinite(durationSeconds) && durationSeconds >= 0) {
+    return { start, end, durationSeconds };
+  }
+  const range = cleanText(typeof value === 'string' ? value : fallbackTimeWindow);
+  const [rangeStart, rangeEnd] = range.split('/').map(normalizeDate);
+  if (rangeStart && rangeEnd) {
+    return { start: rangeStart, end: rangeEnd, durationSeconds: Math.max(0, Math.round((new Date(rangeEnd).getTime() - new Date(rangeStart).getTime()) / 1000)) };
+  }
+  return null;
+}
+
+function formatAudioWindow(audioWindow) {
+  return audioWindow?.start && audioWindow?.end ? `${audioWindow.start}/${audioWindow.end}` : '';
 }
 
 function normalizeVerification(input) {
@@ -1980,16 +2077,6 @@ function normalizeScore(input, eventText) {
     novelty: clampNumber(score.novelty, 0, 1, 0.5),
     confidence: clampNumber(score.confidence, 0, 1, 0.6),
   };
-}
-
-function dedupeEvents(events) {
-  const seen = new Set();
-  return events.filter((event) => {
-    const key = (event.id || event.url || `${event.source?.id}:${event.title}`).toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }
 
 function summarizeEvents(events) {
