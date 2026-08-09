@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,7 +14,13 @@ import {
   parsePcmWav,
   redactSensitiveText,
 } from '../scripts/funasr-realtime-core.js';
-import { checkRealtimeConnection, transcribeRealtimeWav } from '../scripts/funasr-realtime.js';
+import {
+  checkRealtimeConnection,
+  openWebSocket,
+  transcribeRealtimeWav,
+  validateRealtimeEndpoint,
+  waitForSocketEvent,
+} from '../scripts/funasr-realtime.js';
 
 test('builds the FunASR realtime duplex task contract for English PCM16 audio', () => {
   const task = buildRunTask({ taskId: 'task-123', language: 'en' });
@@ -116,6 +124,124 @@ test('streams PCM only after task-started and returns final FunASR text', async 
   assert.equal(sent.at(-1).type, 'close');
 });
 
+test('treats a successful FunASR task with no final sentence as no speech, not a retryable adapter error', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ig-funasr-realtime-no-speech-'));
+  const audioFile = path.join(directory, 'segment.wav');
+  fs.writeFileSync(audioFile, buildPcmWav({ sampleRate: 16000, channels: 1, samples: new Array(800).fill(0) }));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+  const incoming = [
+    { header: { event: 'task-started' } },
+    { header: { event: 'task-finished' } },
+  ];
+  const result = await transcribeRealtimeWav({
+    audioFile,
+    apiKey: 'sk-test-key',
+    taskId: 'task-no-speech',
+    connect: async () => ({
+      sendJson: async () => {},
+      sendBinary: async () => {},
+      nextMessage: async () => incoming.shift(),
+      close: async () => {},
+    }),
+  });
+
+  assert.deepEqual(result, {
+    text: '',
+    noSpeech: true,
+    backend: 'funasr-realtime',
+    taskId: 'task-no-speech',
+  });
+});
+
+test('blocks remote plaintext WebSocket endpoints but permits local fixture endpoints and secure remote endpoints', () => {
+  assert.equal(validateRealtimeEndpoint('ws://127.0.0.1:8787/inference'), 'ws://127.0.0.1:8787/inference');
+  assert.equal(validateRealtimeEndpoint('wss://dashscope.aliyuncs.com/api-ws/v1/inference'), 'wss://dashscope.aliyuncs.com/api-ws/v1/inference');
+  assert.throws(() => validateRealtimeEndpoint('ws://api.example.test/inference'), /loopback/i);
+  assert.throws(() => validateRealtimeEndpoint('https://api.example.test/inference'), /ws or wss/i);
+});
+
+test('bypasses HTTP proxies for every permitted 127/8 local WebSocket endpoint', async (t) => {
+  let proxyConnections = 0;
+  const proxy = net.createServer((socket) => {
+    proxyConnections += 1;
+    socket.once('data', () => socket.end('HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n'));
+  });
+  const proxyPort = await listen(proxy, '127.0.0.1');
+  const targetPort = await reserveClosedPort();
+  t.after(async () => {
+    await closeServer(proxy);
+  });
+
+  await withTemporaryEnv({
+    HTTP_PROXY: `http://127.0.0.1:${proxyPort}`,
+    http_proxy: undefined,
+    HTTPS_PROXY: undefined,
+    https_proxy: undefined,
+    NO_PROXY: '',
+    no_proxy: '',
+  }, async () => {
+    await assert.rejects(() => openWebSocket({
+      endpoint: `ws://127.0.0.2:${targetPort}/inference`,
+      apiKey: 'sk-test-loopback-proxy-regression',
+      timeoutMs: 1_000,
+    }));
+  });
+
+  assert.equal(proxyConnections, 0);
+});
+
+test('destroys a socket when connecting times out', async () => {
+  const socket = new EventEmitter();
+  socket.destroyed = false;
+  socket.destroy = () => { socket.destroyed = true; };
+
+  await assert.rejects(
+    () => waitForSocketEvent(socket, 'connect', 1),
+    /timed out waiting for connect/i,
+  );
+  assert.equal(socket.destroyed, true);
+});
+
+test('destroys a stalled HTTPS proxy CONNECT socket after its handshake timeout', async (t) => {
+  const sockets = new Set();
+  let connectRequests = 0;
+  const proxy = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.once('data', (chunk) => {
+      if (String(chunk).startsWith('CONNECT ')) connectRequests += 1;
+      // Deliberately never reply: this models a stalled proxy CONNECT handshake.
+    });
+    socket.once('close', () => sockets.delete(socket));
+  });
+  const proxyPort = await listen(proxy, '127.0.0.1');
+  t.after(async () => {
+    for (const socket of sockets) socket.destroy();
+    await closeServer(proxy);
+  });
+
+  await withTemporaryEnv({
+    HTTP_PROXY: undefined,
+    http_proxy: undefined,
+    HTTPS_PROXY: `http://127.0.0.1:${proxyPort}`,
+    https_proxy: undefined,
+    NO_PROXY: '',
+    no_proxy: '',
+  }, async () => {
+    await assert.rejects(
+      () => openWebSocket({
+        endpoint: 'wss://example.test/inference',
+        apiKey: 'sk-test-proxy-connect-timeout',
+        timeoutMs: 30,
+      }),
+      /WebSocket HTTP handshake timed out/i,
+    );
+  });
+
+  assert.equal(connectRequests, 1);
+  assert.equal(await waitFor(() => sockets.size === 0), true);
+});
+
 test('fails a realtime task without leaking its API key', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ig-funasr-realtime-error-'));
   const audioFile = path.join(directory, 'segment.wav');
@@ -183,4 +309,51 @@ function uint32le(value) {
   const output = Buffer.alloc(4);
   output.writeUInt32LE(value, 0);
   return output;
+}
+
+async function listen(server, host) {
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, host, () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+  return server.address().port;
+}
+
+async function closeServer(server) {
+  await new Promise((resolve) => server.close(() => resolve()));
+}
+
+async function reserveClosedPort() {
+  const server = net.createServer();
+  const port = await listen(server, '127.0.0.1');
+  await closeServer(server);
+  return port;
+}
+
+async function withTemporaryEnv(values, callback) {
+  const original = new Map(Object.keys(values).map((key) => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    return await callback();
+  } finally {
+    for (const [key, value] of original) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+async function waitFor(predicate, { timeoutMs = 250, intervalMs = 5 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return predicate();
 }

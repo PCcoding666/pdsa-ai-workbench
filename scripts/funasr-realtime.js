@@ -14,6 +14,7 @@ import {
   parsePcmWav,
   redactSensitiveText,
 } from './funasr-realtime-core.js';
+import { isLoopbackHostname } from './asr-core.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const DEFAULT_ENDPOINT = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference';
@@ -39,9 +40,10 @@ export async function checkRealtimeConnection({
 } = {}) {
   const normalizedKey = cleanText(apiKey);
   if (!normalizedKey) throw new Error('DASHSCOPE_API_KEY is required for FunASR realtime.');
+  const normalizedEndpoint = validateRealtimeEndpoint(endpoint);
   let socket;
   try {
-    socket = await connect({ endpoint, apiKey: normalizedKey, timeoutMs: startupTimeoutMs });
+    socket = await connect({ endpoint: normalizedEndpoint, apiKey: normalizedKey, timeoutMs: startupTimeoutMs });
     const state = createRealtimeState();
     await socket.sendJson(buildRunTask({ taskId, language }));
     await waitForRealtimeState(socket, state, {
@@ -80,13 +82,14 @@ export async function transcribeRealtimeWav({
   const normalizedKey = cleanText(apiKey);
   if (!normalizedKey) throw new Error('DASHSCOPE_API_KEY is required for FunASR realtime.');
   if (!audioFile || !fs.existsSync(audioFile)) throw new Error(`Audio file does not exist: ${audioFile || '(empty)'}`);
+  const normalizedEndpoint = validateRealtimeEndpoint(endpoint);
 
   const { pcm } = parsePcmWav(fs.readFileSync(audioFile));
   if (!pcm.length) throw new Error('FunASR realtime audio segment is empty.');
 
   let socket;
   try {
-    socket = await connect({ endpoint, apiKey: normalizedKey, timeoutMs: startupTimeoutMs });
+    socket = await connect({ endpoint: normalizedEndpoint, apiKey: normalizedKey, timeoutMs: startupTimeoutMs });
     const state = createRealtimeState();
     await socket.sendJson(buildRunTask({ taskId, language }));
     await waitForRealtimeState(socket, state, {
@@ -104,8 +107,8 @@ export async function transcribeRealtimeWav({
       predicate: (current) => current.taskFinished,
       waitingFor: 'task-finished',
     });
-    if (!state.transcript) throw new Error('FunASR realtime returned an empty final transcript.');
-    return { text: state.transcript, backend: 'funasr-realtime', taskId };
+    const text = cleanText(state.transcript);
+    return { text, noSpeech: !text, backend: 'funasr-realtime', taskId };
   } catch (error) {
     throw redactError(error, normalizedKey);
   } finally {
@@ -113,9 +116,25 @@ export async function transcribeRealtimeWav({
   }
 }
 
+export function validateRealtimeEndpoint(value) {
+  const raw = cleanText(value);
+  let target;
+  try {
+    target = new URL(raw);
+  } catch {
+    throw new Error(`FunASR realtime endpoint must be a valid ws or wss URL: ${raw || '(empty)'}`);
+  }
+  if (!['ws:', 'wss:'].includes(target.protocol)) {
+    throw new Error(`FunASR realtime endpoint must use ws or wss: ${target.protocol || raw}`);
+  }
+  if (target.protocol === 'ws:' && !isLoopbackHostname(target.hostname)) {
+    throw new Error('Remote plaintext FunASR WebSocket endpoints are blocked. Use a loopback ws:// fixture or a secure wss:// endpoint.');
+  }
+  return target.toString().replace(/\/$/, '');
+}
+
 export async function openWebSocket({ endpoint, apiKey, timeoutMs = 20_000 } = {}) {
-  const target = new URL(endpoint);
-  if (!['ws:', 'wss:'].includes(target.protocol)) throw new Error(`Unsupported WebSocket protocol: ${target.protocol}`);
+  const target = new URL(validateRealtimeEndpoint(endpoint));
   const transport = await createTransport(target, timeoutMs);
   try {
     const key = crypto.randomBytes(16).toString('base64');
@@ -173,7 +192,8 @@ async function main() {
     endpoint: process.env.DASHSCOPE_REALTIME_ENDPOINT || DEFAULT_ENDPOINT,
     language: optionValue(args, '--language') || process.env.ASR_LANGUAGE || 'en',
   });
-  process.stdout.write(`${result.text}\n`);
+  if (args.includes('--json')) process.stdout.write(`${JSON.stringify(result)}\n`);
+  else if (result.text) process.stdout.write(`${result.text}\n`);
 }
 
 async function waitForRealtimeState(socket, state, { timeoutMs, predicate, waitingFor }) {
@@ -237,12 +257,12 @@ function resolveProxy(target) {
 
 function shouldBypassProxy(hostname) {
   const host = String(hostname || '').toLowerCase();
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true;
+  if (isLoopbackHostname(host)) return true;
   const entries = String(process.env.NO_PROXY || process.env.no_proxy || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
   return entries.some((entry) => entry === '*' || host === entry || (entry.startsWith('.') && host.endsWith(entry)) || host.endsWith(`.${entry}`));
 }
 
-function waitForSocketEvent(socket, event, timeoutMs) {
+export function waitForSocketEvent(socket, event, timeoutMs) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => finish(reject, new Error(`WebSocket transport timed out waiting for ${event}.`)), timeoutMs);
     const onError = (error) => finish(reject, error);
@@ -251,6 +271,7 @@ function waitForSocketEvent(socket, event, timeoutMs) {
       clearTimeout(timeout);
       socket.off('error', onError);
       socket.off(event, onEvent);
+      if (callback === reject && typeof socket.destroy === 'function' && !socket.destroyed) socket.destroy();
       callback(value);
     };
     socket.once('error', onError);
@@ -275,6 +296,7 @@ function readHttpHeaders(socket, timeoutMs) {
       socket.off('data', onData);
       socket.off('error', onError);
       socket.off('close', onClose);
+      if (callback === reject && typeof socket.destroy === 'function' && !socket.destroyed) socket.destroy();
       callback(value);
     };
     socket.on('data', onData);

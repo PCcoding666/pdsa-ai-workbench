@@ -7,8 +7,8 @@
     "node": ">=20.6.0"
   },
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
-    "dev:all": "concurrently -k -n api,web -c cyan,green \"node --env-file-if-exists=.env server/index.js\" \"vite --host 0.0.0.0 --port 3001\"",
+    "dev": "vite",
+    "dev:all": "concurrently -k -n api,web -c cyan,green \"node --env-file-if-exists=.env server/index.js\" \"vite --port 3001\"",
     "asr:preflight": "node --env-file-if-exists=.env scripts/asr-preflight.js",
     "asr:funasr:check": "node --env-file-if-exists=.env scripts/funasr-realtime.js --check",
     "asr:bloomberg": "node --env-file-if-exists=.env scripts/asr-worker.js --source bloomberg-tv",
@@ -16,7 +16,7 @@
     "capture:bloomberg": "node --env-file-if-exists=.env scripts/asr-capture.js --source bloomberg-tv",
     "capture:cnbc": "node --env-file-if-exists=.env scripts/asr-capture.js --source cnbc-live-tv",
     "asr:stack": "node --env-file-if-exists=.env scripts/asr-stack.js",
-    "test:asr": "node --test test/asr-*.test.js test/funasr-realtime.test.js",
+    "test:asr": "node --test test/asr-*.test.js test/funasr-realtime.test.js test/server-network-security.test.js",
     "audio:list": "node --env-file-if-exists=.env scripts/asr-capture.js --list-devices",
     "serenity:domains:once": "node scripts/serenity-domain-scheduler.js",
     "serenity:domains:dry-run": "node scripts/serenity-domain-scheduler.js --dry-run",
@@ -24,7 +24,7 @@
     "server": "node --env-file-if-exists=.env server/index.js",
     "test": "node --test",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview"
   },
   "dependencies": {
     "express": "^5.1.0",

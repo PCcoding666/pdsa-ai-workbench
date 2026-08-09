@@ -127,10 +127,10 @@ A run cannot close unless all required checks pass. Important checks include:
 
 ## Obsidian Sync
 
-Default vault:
+The portable default vault is `data/obsidian` under `DATA_DIR`. Set an explicit actual vault path only when you want to mirror notes there:
 
 ```text
-/Users/chengpeng/Documents/Obsidian Vault
+/path/to/your/Obsidian Vault
 ```
 
 Default directory:

@@ -72,7 +72,7 @@ test('terminal API failure isolates audio and a manual recovery replay reaches t
   assert.equal(fs.readdirSync(fixture.processed).filter((name) => name.endsWith('.wav')).length, 1);
 });
 
-test('worker posts to a Basic-Auth-protected local Express API when ASR credentials are configured', async (t) => {
+test('worker posts to a Basic-Auth-protected local Express API by falling back from empty ASR credentials to APP credentials', async (t) => {
   const fixture = createFixture();
   const port = await reservePort();
   const api = startApi(port, fixture.dataDir, { APP_USERNAME: 'local-asr', APP_PASSWORD: 'local-password' });
@@ -82,8 +82,10 @@ test('worker posts to a Basic-Auth-protected local Express API when ASR credenti
   fs.writeFileSync(path.join(fixture.incoming, '20260713T151040.wav.txt'), 'Microsoft MSFT mentioned cloud demand.');
 
   const worker = await runSidecarWorker(fixture, `http://127.0.0.1:${port}`, {
-    ASR_API_USERNAME: 'local-asr',
-    ASR_API_PASSWORD: 'local-password',
+    ASR_API_USERNAME: '',
+    ASR_API_PASSWORD: '',
+    APP_USERNAME: 'local-asr',
+    APP_PASSWORD: 'local-password',
   });
   assert.equal(worker.code, 0, worker.stderr);
   const stored = await fetch(`http://127.0.0.1:${port}/api/events?stored=1`, {
@@ -98,11 +100,17 @@ function createFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ig-asr-full-pipeline-'));
   const incoming = path.join(root, 'incoming');
   const processed = path.join(root, 'processed');
+  const skipped = path.join(root, 'skipped');
   const failed = path.join(root, 'failed');
   const logs = path.join(root, 'logs');
   const dataDir = path.join(root, 'data');
-  [incoming, processed, failed, logs, dataDir].forEach((directory) => fs.mkdirSync(directory, { recursive: true }));
-  return { root, incoming, processed, failed, logs, dataDir };
+  [incoming, processed, skipped, failed, logs, dataDir].forEach(createPrivateDirectory);
+  return { root, incoming, processed, skipped, failed, logs, dataDir };
+}
+
+function createPrivateDirectory(directory) {
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  fs.chmodSync(directory, 0o700);
 }
 
 function writeSyntheticWav(directory, name, durationSeconds = 1) {
@@ -148,8 +156,10 @@ function runSidecarWorker(fixture, apiBase, overrides = {}) {
       ASR_API_BASE: apiBase,
       ASR_WATCH_DIR: fixture.incoming,
       ASR_PROCESSED_DIR: fixture.processed,
+      ASR_SKIPPED_DIR: fixture.skipped,
       ASR_FAILED_DIR: fixture.failed,
       ASR_LOG_DIR: fixture.logs,
+      ASR_RUNTIME_STATE_FILE: path.join(fixture.root, 'asr-runtime.json'),
       ASR_WORKER_ID: 'full-pipeline-worker',
       ...overrides,
     },

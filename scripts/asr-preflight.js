@@ -5,12 +5,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   findLoopbackDevices,
+  ensurePrivateRuntimeDirectory,
   isConfiguredLoopbackDevice,
   isNonSilentSignal,
   loadAllSourceConfigs,
   parseAvfoundationAudioDevices,
   parseVolumedetectOutput,
   readJsonFile,
+  resolveApiCredentials,
   resolveDevice,
   writeJsonAtomic,
 } from './asr-core.js';
@@ -169,21 +171,18 @@ async function main() {
     return;
   }
 
-  const sourceConfigs = selectPreflightSources(loadAllSourceConfigs(), optionValues('--source'));
+  const allSourceConfigs = loadAllSourceConfigs();
+  const sourceConfigs = selectPreflightSources(allSourceConfigs, optionValues('--source'));
   const runtimeFile = sourceConfigs[0]?.runtimeStateFile || path.resolve('audio', 'asr-runtime.json');
+  ensurePrivateRuntimeDirectory(path.dirname(runtimeFile));
   const previousRuntime = readJsonFile(runtimeFile, {});
-  const runtime = {
-    version: 1,
-    updatedAt: new Date().toISOString(),
-    devices,
-    sources: {},
-  };
+  const resolvedSources = {};
   const sourceChecks = [];
   for (const source of sourceConfigs) {
     const device = resolveDevice(source, devices, previousRuntime);
     const deviceIndex = device?.index ?? null;
     if (device) {
-      runtime.sources[source.id] = {
+      resolvedSources[source.id] = {
         deviceIndex,
         deviceName: device.name,
         resolvedAt: new Date().toISOString(),
@@ -206,12 +205,55 @@ async function main() {
       signal,
     });
   }
+  const runtime = mergePreflightRuntimeState({
+    previousRuntime,
+    configuredSources: allSourceConfigs,
+    selectedSourceIds: sourceConfigs.map((source) => source.id),
+    resolvedSources,
+    devices,
+  });
   writeJsonAtomic(runtimeFile, runtime);
 
   const report = buildPreflightReport({ dependencies, devices, sources: sourceChecks });
   writeJsonAtomic(path.join(path.dirname(runtimeFile), 'asr-preflight.json'), report);
   print(report);
   if (process.env.ASR_PREFLIGHT_STRICT === '1' && !report.ready) process.exitCode = 1;
+}
+
+export function mergePreflightRuntimeState({
+  previousRuntime = {},
+  configuredSources = [],
+  selectedSourceIds = [],
+  resolvedSources = {},
+  devices = [],
+  updatedAt = new Date().toISOString(),
+} = {}) {
+  const previousSources = previousRuntime?.sources && typeof previousRuntime.sources === 'object'
+    ? previousRuntime.sources
+    : {};
+  const configured = [...new Set((Array.isArray(configuredSources) ? configuredSources : [])
+    .map((source) => String(source?.id || '').trim())
+    .filter(Boolean))];
+  const selected = new Set((Array.isArray(selectedSourceIds) ? selectedSourceIds : [])
+    .map((sourceId) => String(sourceId || '').trim())
+    .filter(Boolean));
+  const sources = {};
+
+  for (const sourceId of configured) {
+    if (selected.has(sourceId)) {
+      const resolved = resolvedSources?.[sourceId];
+      if (resolved && typeof resolved === 'object') sources[sourceId] = { ...resolved };
+    } else if (previousSources[sourceId] && typeof previousSources[sourceId] === 'object') {
+      sources[sourceId] = { ...previousSources[sourceId] };
+    }
+  }
+
+  return {
+    version: 1,
+    updatedAt,
+    devices: Array.isArray(devices) ? devices : [],
+    sources,
+  };
 }
 
 export function checkExecutable(command, commandArgs, {
@@ -329,23 +371,16 @@ export async function checkApi(apiBase, { credentials = getApiCredentials(), fet
 }
 
 function getApiCredentials() {
-  const asrUsername = String(process.env.ASR_API_USERNAME || '');
-  const asrPassword = String(process.env.ASR_API_PASSWORD || '');
-  if (asrUsername || asrPassword) return { username: asrUsername, password: asrPassword, source: 'ASR_API_*' };
-  return {
-    username: String(process.env.APP_USERNAME || ''),
-    password: String(process.env.APP_PASSWORD || ''),
-    source: 'APP_*',
-  };
+  return resolveApiCredentials() || { username: '', password: '', source: 'none' };
 }
 
 function normalizeApiCredentials(credentials = {}) {
-  const username = String(credentials.username || '');
-  const password = String(credentials.password || '');
+  const username = String(credentials?.username || '');
+  const password = String(credentials?.password || '');
   return {
     username,
     password,
-    source: String(credentials.source || 'none'),
+    source: String(credentials?.source || 'none'),
     configured: Boolean(username || password),
     complete: Boolean(username && password),
   };

@@ -26,6 +26,7 @@ import {
 } from './serenity-domain-scheduler.js';
 import { buildSerenityCompanyAnalysisMock } from './serenity-company-analysis.js';
 import { selectRealtimeEvents, shouldServeStoredLiveEventsImmediately } from './realtime-events.js';
+import { createCorsMiddleware, resolveServerNetworkConfig } from './network-security.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,6 +34,7 @@ const rootDir = path.resolve(__dirname, '..');
 const distDir = path.join(rootDir, 'dist');
 
 const PORT = Number(process.env.PORT || 3002);
+const SERVER_NETWORK = resolveServerNetworkConfig(process.env);
 const CACHE_TTL_MS = Number(process.env.RSS_CACHE_TTL_MS || 10 * 60 * 1000);
 const MAX_ITEMS_PER_SOURCE = Number(process.env.RSS_ITEMS_PER_SOURCE || 8);
 const RSS_FETCH_CONCURRENCY = Number(process.env.RSS_FETCH_CONCURRENCY || 6);
@@ -51,13 +53,13 @@ const VOC_PROJECTS_FILE = path.join(DATA_DIR, 'voc-projects.json');
 const SOURCE_REGISTRY_FILE = path.join(DATA_DIR, 'source-registry.json');
 const EVENTS_FILE = path.join(DATA_DIR, 'events.json');
 const RESEARCH_QUEUE_FILE = path.join(DATA_DIR, 'research-queue.json');
-const SERENITY_ARCHIVE_FILE = process.env.SERENITY_ARCHIVE_FILE || '/Users/chengpeng/Downloads/serenity_2026-06-01.json';
+const SERENITY_ARCHIVE_FILE = process.env.SERENITY_ARCHIVE_FILE || path.join(DATA_DIR, 'serenity-archive.json');
 const SERENITY_THESIS_FILE = path.join(DATA_DIR, 'serenity-thesis-cards.json');
 const SERENITY_DISCOVERY_RUNS_FILE = path.join(DATA_DIR, 'serenity-discovery-runs.json');
 const SERENITY_DOMAIN_WATCHLIST_FILE = path.join(DATA_DIR, 'serenity-domain-watchlist.json');
 const SERENITY_DOMAIN_SCHEDULER_FILE = path.join(DATA_DIR, 'serenity-domain-scheduler-state.json');
 const AI_RADAR_RESEARCH_RUNS_FILE = path.join(DATA_DIR, 'ai-radar-research-runs.json');
-const OBSIDIAN_VAULT_PATH = process.env.OBSIDIAN_VAULT_PATH || '/Users/chengpeng/Documents/Obsidian Vault';
+const OBSIDIAN_VAULT_PATH = process.env.OBSIDIAN_VAULT_PATH || path.join(DATA_DIR, 'obsidian');
 const SERENITY_OBSIDIAN_DIR = process.env.SERENITY_OBSIDIAN_DIR || 'Projects/Information Gain/Serenity Research Runs';
 const OPEN_CABINET_DATA_URL = 'https://open-cabinet.org/data/full-dataset.json';
 const CLOSED_SERENITY_STATUSES = new Set(['closed_no_candidate', 'closed_candidate_found']);
@@ -581,11 +583,7 @@ let officialHoldingsCache = {
 const app = express();
 
 app.use(express.json({ limit: '2mb' }));
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-push-token');
-  next();
-});
+app.use(createCorsMiddleware(SERVER_NETWORK));
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, service: 'pdsa-rss-briefing', time: new Date().toISOString() });
@@ -1228,8 +1226,8 @@ if (fs.existsSync(distDir)) {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`RSS briefing API listening on http://localhost:${PORT}`);
+app.listen(PORT, SERVER_NETWORK.host, () => {
+  console.log(`RSS briefing API listening on http://${SERVER_NETWORK.host}:${PORT}`);
 });
 
 async function getBriefing({ forceRefresh = false } = {}) {
@@ -2691,11 +2689,12 @@ function writeSerenityObsidianNote(run, validation, notePath) {
     }
   }
 
-  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true, mode: 0o700 });
   const content = buildSerenityObsidianNote(run, validation);
   const tmpPath = `${absolutePath}.${process.pid}.tmp`;
-  fs.writeFileSync(tmpPath, `${content.trimEnd()}\n`, 'utf8');
+  fs.writeFileSync(tmpPath, `${content.trimEnd()}\n`, { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(tmpPath, absolutePath);
+  fs.chmodSync(absolutePath, 0o600);
 }
 
 function syncSerenityNextQueue(run) {
@@ -4779,8 +4778,8 @@ function timingSafeEqual(a, b) {
 }
 
 function requireBasicAuth(req, res, next) {
-  const username = process.env.APP_USERNAME;
-  const password = process.env.APP_PASSWORD;
+  const username = SERVER_NETWORK.auth?.username;
+  const password = SERVER_NETWORK.auth?.password;
 
   if (!username || !password) {
     next();
@@ -4831,10 +4830,40 @@ function readJsonFile(filePath, fallback) {
 }
 
 function writeJsonFile(filePath, data) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.${process.pid}.tmp`;
-  fs.writeFileSync(tmpPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
-  fs.renameSync(tmpPath, filePath);
+  ensurePrivateDirectory(path.dirname(filePath));
+  const tmpPath = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  const descriptor = fs.openSync(tmpPath, 'wx', 0o600);
+  try {
+    fs.writeFileSync(descriptor, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+    fs.fchmodSync(descriptor, 0o600);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  try {
+    fs.renameSync(tmpPath, filePath);
+    fs.chmodSync(filePath, 0o600);
+  } catch (error) {
+    try { fs.unlinkSync(tmpPath); } catch (cleanupError) { if (cleanupError.code !== 'ENOENT') throw cleanupError; }
+    throw error;
+  }
+}
+
+function ensurePrivateDirectory(directory) {
+  const resolved = path.resolve(directory);
+  const existed = fs.existsSync(resolved);
+  fs.mkdirSync(resolved, { recursive: true, mode: 0o700 });
+  const stat = fs.statSync(resolved);
+  if (!stat.isDirectory()) throw new Error(`Data path is not a directory: ${resolved}`);
+
+  // Only the repository's default data directory is safe to repair in place.
+  // A configurable DATA_DIR may be a shared parent such as /tmp, which must
+  // never be chmodded by this process.
+  const defaultDataDirectory = path.resolve(rootDir, 'data');
+  const managedByRepository = resolved === defaultDataDirectory;
+  if (!existed || managedByRepository) fs.chmodSync(resolved, 0o700);
+  if (!managedByRepository && existed && (fs.statSync(resolved).mode & 0o077) !== 0) {
+    throw new Error(`DATA_DIR must be a dedicated owner-private directory (0700): ${resolved}`);
+  }
 }
 
 function normalizeSubscription(input) {

@@ -59,6 +59,8 @@ test('transcript API retains complete ASR metadata and stored event readback is 
   assert.equal(stored.events[0].id, payload.id);
   assert.equal(stored.events[0].audioWindow.durationSeconds, 20);
   assert.equal(stored.events[0].evidence[0].audioWindow.end, payload.audioWindow.end);
+  assert.equal(fs.statSync(dataDir).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(path.join(dataDir, 'events.json')).mode & 0o777, 0o600);
 });
 
 test('transcript API rejects incomplete ASR events instead of silently creating manual events', async (t) => {

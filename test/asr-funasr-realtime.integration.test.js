@@ -45,15 +45,39 @@ test('synthetic WAV traverses the first-party FunASR realtime adapter, worker, t
   assert.equal(realtimeFeed.events.find((item) => item.id === event.id)?.transcript, event.transcript);
 });
 
+test('a successful FunASR task without dialogue is skipped once without an API call, retry, or failed isolation', async (t) => {
+  const fixture = createFixture();
+  const realtime = await startRealtimeServer('');
+  t.after(() => realtime.close());
+  writeSyntheticWav(fixture.incoming, '20260720T155010.wav');
+
+  const worker = await runRealtimeWorker(fixture, 'http://127.0.0.1:9', realtime.endpoint);
+  assert.equal(worker.code, 0, worker.stderr);
+  assert.match(worker.stdout, /skipped no-speech/i);
+  assert.equal(realtime.received.runTask.payload.model, 'fun-asr-realtime');
+  assert.equal(fs.readdirSync(fixture.skipped).filter((name) => name.endsWith('.wav')).length, 1);
+  assert.equal(fs.readdirSync(fixture.failed).length, 0);
+  const logs = fs.readFileSync(path.join(fixture.logs, 'asr-worker.jsonl'), 'utf8');
+  assert.match(logs, /"type":"file_no_speech"/);
+  assert.equal((logs.match(/"type":"transcribe_retry"/g) || []).length, 0);
+  assert.equal((logs.match(/"type":"post_retry"/g) || []).length, 0);
+});
+
 function createFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ig-asr-funasr-realtime-'));
   const incoming = path.join(root, 'incoming');
   const processed = path.join(root, 'processed');
+  const skipped = path.join(root, 'skipped');
   const failed = path.join(root, 'failed');
   const logs = path.join(root, 'logs');
   const dataDir = path.join(root, 'data');
-  [incoming, processed, failed, logs, dataDir].forEach((directory) => fs.mkdirSync(directory, { recursive: true }));
-  return { root, incoming, processed, failed, logs, dataDir };
+  [incoming, processed, skipped, failed, logs, dataDir].forEach(createPrivateDirectory);
+  return { root, incoming, processed, skipped, failed, logs, dataDir };
+}
+
+function createPrivateDirectory(directory) {
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  fs.chmodSync(directory, 0o700);
 }
 
 function writeSyntheticWav(directory, name) {
@@ -166,8 +190,10 @@ function runRealtimeWorker(fixture, apiBase, endpoint) {
       ASR_API_BASE: apiBase,
       ASR_WATCH_DIR: fixture.incoming,
       ASR_PROCESSED_DIR: fixture.processed,
+      ASR_SKIPPED_DIR: fixture.skipped,
       ASR_FAILED_DIR: fixture.failed,
       ASR_LOG_DIR: fixture.logs,
+      ASR_RUNTIME_STATE_FILE: path.join(fixture.root, 'asr-runtime.json'),
       ASR_WORKER_ID: 'funasr-realtime-worker',
       DASHSCOPE_API_KEY: 'sk-fake-realtime-key',
       DASHSCOPE_REALTIME_ENDPOINT: endpoint,

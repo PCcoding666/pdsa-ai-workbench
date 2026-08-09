@@ -48,7 +48,7 @@ The engine currently consumes `ticker`, `domain`, `benchmark` and optional
 3. Copy `com.information-gain.research-engine.plist` to `~/Library/LaunchAgents/`.
 4. Edit the paths marked `REPLACE_ME`:
    - node binary, e.g. output of `which node`
-   - repo path, e.g. `/Users/chengpeng/Documents/Information-Gain`
+   - repo path, e.g. `/absolute/path/to/Information-Gain`
    - `SEC_USER_AGENT`
    - optional Bark URL
 5. Confirm the plist `UNIVERSE_FILE` points at
@@ -69,7 +69,7 @@ settles and before your morning review. Adjust `StartCalendarInterval` to taste.
 
 ```cron
 # m h dom mon dow  command
-15 6 * * *  cd /Users/chengpeng/Documents/Information-Gain && SEC_USER_AGENT="Information Gain research you@example.com" UNIVERSE_FILE="/Users/chengpeng/Documents/Information-Gain/config/auto-research-universe.json" /usr/local/bin/node scripts/research-engine.js --once >> logs/research-engine.out.log 2>> logs/research-engine.err.log
+15 6 * * *  cd /absolute/path/to/Information-Gain && SEC_USER_AGENT="Information Gain research you@example.com" UNIVERSE_FILE="/absolute/path/to/Information-Gain/config/auto-research-universe.json" /usr/local/bin/node scripts/research-engine.js --once >> logs/research-engine.out.log 2>> logs/research-engine.err.log
 ```
 
 ## Verify before scheduling

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendJsonlWithRotation, loadAllSourceConfigs, readJsonFile, writeJsonAtomic } from './asr-core.js';
+import { appendJsonlWithRotation, ensurePrivateRuntimeDirectory, loadAllSourceConfigs, readJsonFile, writeJsonAtomic } from './asr-core.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,6 +52,10 @@ export async function stopManagedChildren(children, { graceMs = 10000, forceMs =
   await Promise.all(managedChildren.map((child) => stopManagedChild(child, { graceMs, forceMs })));
 }
 
+export function isBlockedExitCode(code) {
+  return Number(code) === 3;
+}
+
 function stopManagedChild(child, { graceMs, forceMs }) {
   return new Promise((resolve) => {
     let finished = false;
@@ -87,11 +91,11 @@ async function main() {
   if (!selected.length) throw new Error('No enabled ASR sources. Enable a source in config/asr-sources.json or pass --source <id>.');
 
   const runtimeFile = selected[0].runtimeStateFile;
+  ensurePrivateRuntimeDirectory(path.dirname(runtimeFile));
   const runtime = readJsonFile(runtimeFile, {});
   const plan = buildStackPlan({ sources: selected, runtime });
   const stateFile = path.join(path.dirname(runtimeFile), 'asr-stack.json');
   const logFile = path.join(path.dirname(runtimeFile), 'asr-stack.jsonl');
-  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
   const state = {
     status: 'starting',
     startedAt: new Date().toISOString(),
@@ -139,9 +143,15 @@ async function main() {
           writeState();
           return;
         }
+        component.lastError = `exit code ${code ?? 'null'}${signal ? ` signal ${signal}` : ''}`;
+        if (isBlockedExitCode(code)) {
+          component.status = 'blocked';
+          writeState();
+          log('component_blocked', { componentKey, ...component });
+          return;
+        }
         component.status = 'restarting';
         component.restarts += 1;
-        component.lastError = `exit code ${code ?? 'null'}${signal ? ` signal ${signal}` : ''}`;
         const delayMs = Math.min(30000, 1000 * (2 ** Math.min(component.restarts - 1, 5)));
         writeState();
         log('component_restart_scheduled', { componentKey, delayMs, ...component });

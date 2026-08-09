@@ -127,10 +127,10 @@ V2 validator 返回：
 
 ## Obsidian 同步
 
-默认 vault：
+默认 vault 是 `DATA_DIR` 下的 `obsidian/` 本地可移植目录。仅当需要镜像到实际 Obsidian vault 时才显式设置路径：
 
 ```text
-/Users/chengpeng/Documents/Obsidian Vault
+/path/to/your/Obsidian Vault
 ```
 
 默认目录：

@@ -19,6 +19,8 @@ npm run dev:all
 - 前端：<http://localhost:3001/realtime-flow>
 - RSS 后端：<http://localhost:3002/api/briefing>
 
+默认开发服务器与 API 只绑定本机 loopback（`127.0.0.1`），不向局域网公开；如确有反向代理或远程访问需求，见下方“访问保护与数据”。
+
 ## Information Gain 架构接口
 
 后端新增第一阶段承载层：
@@ -47,11 +49,23 @@ npm run dev:all
 curl -X POST http://localhost:3002/api/events/transcripts \
   -H "Content-Type: application/json" \
   -d '{
+    "id": "transcript:bloomberg-tv:example-segment-001",
     "sourceId": "bloomberg-tv",
+    "sourceName": "Bloomberg TV",
     "timestamp": "2026-06-01T13:42:00Z",
-    "transcript": "NVIDIA and AMD are being discussed as investors focus on hyperscaler AI capex and data center demand."
+    "transcript": "NVIDIA and AMD are being discussed as investors focus on hyperscaler AI capex and data center demand.",
+    "audioWindow": {
+      "start": "2026-06-01T13:42:00Z",
+      "end": "2026-06-01T13:42:05Z",
+      "durationSeconds": 5
+    },
+    "audioFile": "audio/bloomberg-tv/processed/example-segment-001.wav",
+    "asrBackend": "funasr-realtime",
+    "workerId": "bloomberg-worker-example"
   }'
 ```
+
+若配置了 `APP_USERNAME`/`APP_PASSWORD`，此请求还必须携带对应的 HTTP Basic Auth；worker 会优先使用完整的 `ASR_API_USERNAME`/`ASR_API_PASSWORD`，两者均为空时才回退到完整的 `APP_*` 凭据。
 
 示例：创建研究任务：
 
@@ -181,10 +195,10 @@ Discovery run 现已由可执行的 V2 协议约束，而不是只保存展示�
 
 任何 Information Gain 系统演进、research workflow、source policy、dashboard、skill 或自动化规则的改动，都必须同步更新 Obsidian。
 
-当前 vault：
+默认 vault 是仓库 `data/obsidian` 下的本地、可移植同步目录。若要同步到实际 Obsidian vault，在忽略的 `.env` 中显式设置 `OBSIDIAN_VAULT_PATH`：
 
 ```text
-/Users/chengpeng/Documents/Obsidian Vault
+/path/to/your/Obsidian Vault
 ```
 
 本项目相关记录：
@@ -195,10 +209,10 @@ Discovery run 现已由可执行的 V2 协议约束，而不是只保存展示�
 
 Serenity run note 默认 frontmatter 包含 `run_id`、`run_mode`、`status`、`research_date`、`market_data_as_of`、`protocol_version` 和 `last_synced_at`。同步只覆盖 `run_id` 相同的文件；冲突或写入失败会记录为 sync failure，并阻止 Research Run 关闭。
 
-默认 archive 路径是：
+默认 archive 路径是 `data/serenity-archive.json`（文件不存在时 archive 为空）。如已有导出的 archive，在忽略的 `.env` 中显式设置：
 
 ```bash
-SERENITY_ARCHIVE_FILE="/Users/chengpeng/Downloads/serenity_2026-06-01.json"
+SERENITY_ARCHIVE_FILE="/path/to/serenity-export.json"
 ```
 
 自定义候选卡会保存到 `data/serenity-thesis-cards.json`。
@@ -237,7 +251,7 @@ brew install --cask blackhole-2ch
 
 4. 打开 **Audio MIDI Setup（音频 MIDI 设置）**，点击 `+` → **Create Multi-Output Device**，勾选本机扬声器和 `BlackHole 2ch`。把 Chrome/系统输出切到该 Multi-Output Device；这样你仍能听见声音，同时 BlackHole 成为录音输入。首次实际采集时若 macOS 要求权限，批准终端/Codex 的麦克风（音频输入）权限。
 
-5. 在 `config/asr-sources.json` 中确认 `deviceName` 与 Audio MIDI Setup 显示的名称**逐字一致**。不要手填索引：preflight 会枚举 AVFoundation 设备并把真实索引写进被 Git 忽略的 `audio/asr-runtime.json`。
+5. 在 `config/asr-sources.json` 中确认 `deviceName` 与 Audio MIDI Setup 显示的名称**逐字一致**。不要手填索引：preflight 会枚举 AVFoundation 设备并把真实索引写进被 Git 忽略、权限为 `0600` 的 `audio/asr-runtime.json`；只预检一个来源时，会保留其他已配置来源的映射。若覆盖 `ASR_RUNTIME_STATE_FILE`，其父目录必须是专用的 `0700` 目录；脚本绝不会为了“修权限”而改动已有的共享父目录（例如 `/tmp`）。
 
 ### 预检与启动
 
@@ -293,7 +307,7 @@ npm run asr:bloomberg
 npm run asr:stack
 ```
 
-监督器会独立重启单个来源的 capture/worker；一个来源失败不会停止其他来源。若两个来源配置到同一个 BlackHole 索引，监督器会只阻止第二个 capture，避免把两个频道误标成不同来源。
+监督器会独立重启单个来源的 capture/worker；一个来源失败不会停止其他来源。若两个来源配置到同一个 BlackHole 索引，监督器会只阻止第二个 capture，避免把两个频道误标成不同来源。已经被另一个同来源 worker 或 capture 占用时，组件会标为 `blocked`（退出码 `3`），监督器不会无休止重启它；先停止锁持有者再重新启动。
 
 ### Bloomberg 与 CNBC 配置
 
@@ -320,16 +334,20 @@ audio/<source-id>/
   staging/     # ffmpeg 正在写入的 .wav.part；不会被 worker 读取
   incoming/    # 已二次稳定检查并原子 rename 的 WAV
   processed/   # 已转录并成功上报的音频及可选 sidecar（默认保留 7 天）
+  skipped/     # 已确认静音或 FunASR 正常返回“无对白”的片段（默认保留 7 天）
   failed/      # 达到重试上限的音频、sidecar 与 .error.json（默认保留 30 天）
   logs/        # capture/worker JSONL、health.json、dedupe.json/.jsonl 与诊断状态（轮转）
 ```
 
-- Capture 先写 `staging/*.wav.part`，确认稳定后原子发布到 `incoming/*.wav`；worker 再做一次稳定检查。每个实际 loopback 设备都有原子锁，因此不能被两个来源同时错误标记；陈旧 PID 锁会自动回收。
+- Capture 先写 `staging/*.wav.part`，确认稳定后用 FFmpeg `volumedetect` 判断片段是否静音：确认静音的片段原子移入 `skipped/`，不会进入 worker 或请求百炼。若信号检测器本身不可用，capture 会保守地发布片段，而不是误删音频；worker 仍会把百炼正常返回的空文本作为“无对白”移入 `skipped/`，不重试、不写事件、不进入 `failed/`。
+- worker 再做一次稳定检查，并为每个 `sourceId` 加其规范化 `incoming/` 路径在仓库自有的私有锁目录中持有独立原子 lease；因此覆盖 runtime-state 路径无法绕过同一实际输入的锁，而彼此独立的输入目录不会互相阻塞。第二个同来源同输入 worker 会在云端调用前以诊断性退出码 `3` 被阻止；陈旧 PID lease 会在短暂、独占的 `*.recovery.lock` 守卫下自动回收，避免回收时删除另一个刚启动的 owner。若机器恰好在回收临界区断电而留下 recovery guard，系统会故意 fail-closed 并在日志中要求人工复核；确认没有 `asr-capture`、`asr-worker` 或 `asr-stack` 进程后，只删除对应私有锁目录中的 `*.recovery.lock`，再重新启动。运行中绝不要手动删除普通 `.lock` 文件。不同来源不会互相停止。
 - worker 用音频 SHA-256 去重，并对同来源相同文本使用默认 10 分钟窗口去重。API 事件 ID 由来源和音频哈希确定，重试或崩溃恢复只会 upsert 同一事件；去重状态默认保留 30 天、最多各 50,000 条，避免长期无界增长。
 - 事件中的 `audioFile` 是形如 `audio/<source-id>/processed/<segment>.wav` 的逻辑片段引用，不是本机绝对路径，也不是下载端点；音频本体不会通过事件 API 暴露。
-- ASR 与 API 失败会进行默认 3 次指数退避重试；HTTP 请求默认 20 秒超时。仍失败才进入 `failed/`，原因在同名 `.error.json` 和 JSONL 中。
+- `ASR_MAX_RETRIES=3` 的含义是**初始一次加最多 3 次指数退避重试（最多 4 次尝试）**；HTTP 请求默认 20 秒超时。仅真正的 ASR/API 失败会重试，仍失败才进入 `failed/`，原因在同名 `.error.json` 和 JSONL 中。
 - FunASR realtime 适配器只在内存中处理 PCM 和最终文本，不会在仓库写入云端中间结果；JSONL 会记录 `processingLatencyMs` 和 `segmentToEventLatencyMs`，health 文件记录最后事件与错误。`Ctrl-C` 会停止 capture/worker/其 ASR 子进程，并保留尚未完成的输入供下次启动恢复。
-- 为使服务可以长期运行，成功音频默认保留 7 天、失败隔离默认保留 30 天；每小时清理一次。`capture.jsonl`、`asr-worker.jsonl` 和 `asr-stack.jsonl` 默认每个 10 MiB 轮转、保留 5 个旧文件。可在忽略的 `.env` 以 `ASR_AUDIO_RETENTION_DAYS`、`ASR_FAILED_RETENTION_DAYS`、`ASR_LOG_MAX_BYTES`、`ASR_LOG_MAX_ROTATED_FILES` 调整；把保留天数设为 `0` 即交由外部归档/清理。
+- 为使服务可以长期运行，成功/跳过音频默认保留 7 天、失败隔离默认保留 30 天；每小时清理一次。`capture.jsonl`、`asr-worker.jsonl` 和 `asr-stack.jsonl` 默认每个 10 MiB 轮转、保留 5 个旧文件。可在忽略的 `.env` 以 `ASR_AUDIO_RETENTION_DAYS`、`ASR_FAILED_RETENTION_DAYS`、`ASR_LOG_MAX_BYTES`、`ASR_LOG_MAX_ROTATED_FILES` 调整；把保留天数设为 `0` 即交由外部归档/清理。
+- 仓库默认 `audio/` 下的 ASR 音频、状态和日志目录会在启动时收紧为目录 `0700`、文件 `0600`；`.env` 也应保持 `0600`。若把任一 ASR 运行路径覆盖到仓库外，先自行创建专用 `0700` 目录；脚本会拒绝已有的宽权限目录，绝不 `chmod` 共享父目录。不要把 `audio/`、`data/`、cookie、音频或密钥加入 Git。
+- `ASR_API_BASE` 只接受 loopback `http://` 或任意 `https://`；`DASHSCOPE_REALTIME_ENDPOINT` 只接受本机测试用 `ws://` 或安全的 `wss://`。这样环境变量无法把转录文本、Basic Auth 或百炼密钥发送到远程明文端点。
 - 查看设备而不创建目录：`npm run audio:list`。查看实时健康文件：`cat audio/<source-id>/logs/{capture-health,health}.json`。
 - 修复原因后，可把 `failed/` 中原始音频（以及 sidecar 测试文本，如有）移回对应 `incoming/` 让 worker 再次处理；不要移动 `.error.json`。
 - 如果 `node --version`、`ffmpeg -version` 或 `ffprobe -version` 本身卡住/被 macOS 拒绝，先修复受信任的运行时安装后再启动链路。不要通过关闭 SIP、绕过 Gatekeeper 或移除系统安全策略解决；preflight 在工具无法执行时会保持 `NOT READY`。
@@ -388,18 +406,36 @@ AI 简报接口会在 `insights` 字段中输出：
 
 ## 访问保护与数据
 
-可通过环境变量启用 HTTP Basic Auth：
+默认 API 只监听 `127.0.0.1`，Vite 也只监听本机；默认不发送 `Access-Control-Allow-Origin`。因此同一台 Mac 上的浏览器可通过开发代理访问，但局域网客户端不能直接伪造直播转录事件。
+
+如需本机 Basic Auth，可同时设置：
 
 ```bash
 APP_USERNAME="pdsa"
 APP_PASSWORD="replace-with-a-strong-password"
 ```
 
+如因受控反向代理等明确场景必须让 Node API 绑定非 loopback 地址，必须同时显式配置**全部**以下项；否则服务会拒绝启动。优先做法仍是让 Node 保持 loopback，然后让 HTTPS 反向代理转发。
+
+```bash
+APP_HOST="0.0.0.0"
+APP_ALLOW_REMOTE_ACCESS=1
+APP_USERNAME="pdsa"
+APP_PASSWORD="replace-with-a-strong-password"
+# 仅列出确实需要浏览器跨域调用的精确 Origin；留空表示不开放 CORS。
+APP_CORS_ORIGINS="https://console.example.com"
+```
+
+`APP_CORS_ORIGINS=*` 会被拒绝。远程绑定时所有非健康检查 API 都要求 Basic Auth；不要把明文 HTTP 暴露到公网。
+
 订阅和 VOC 项目默认保存到 `data/`，生产环境建议指定：
 
 ```bash
+install -d -m 700 /var/lib/pdsa-ai-workbench
 DATA_DIR="/var/lib/pdsa-ai-workbench"
 ```
+
+仓库默认 `data/` 会收紧为 `0700`，写入的 JSON 与本地 Obsidian note 为 `0600`。自定义 `DATA_DIR` 必须是专用 `0700` 目录；不要直接设为 `/tmp` 或其他共享目录。
 
 ### VOC 大模型分析
 
@@ -433,7 +469,7 @@ scripts/backup-data.sh
 
 ### HTTPS 与域名
 
-当前公网 IP 访问可直接使用 `http://<server-ip>:3002/about-ai`。如需 HTTPS，需要先准备一个真实域名并将 A 记录指向服务器公网 IP，然后在服务器上执行：
+不要通过公网 IP 直接访问 Node 的 `:3002` 端口。若需要 HTTPS，保持 Node 在 loopback，准备真实域名并将 A 记录指向服务器公网 IP，然后在服务器上执行：
 
 ```bash
 DOMAIN="ai.example.com" EMAIL="you@example.com" scripts/setup-https.sh

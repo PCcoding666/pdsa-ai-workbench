@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -36,6 +37,7 @@ test('sidecar worker publishes complete metadata, durable health, and atomically
   assert.equal(fs.readdirSync(fixture.incoming).length, 0);
   assert.equal(fs.readdirSync(fixture.failed).length, 0);
   assert.equal(fs.readdirSync(fixture.processed).filter((name) => name.endsWith('.wav')).length, 1);
+  assert.equal(fs.statSync(path.join(fixture.processed, fs.readdirSync(fixture.processed).find((name) => name.endsWith('.wav')))).mode & 0o777, 0o600);
   const health = JSON.parse(fs.readFileSync(path.join(fixture.logs, 'health.json'), 'utf8'));
   assert.equal(health.status, 'healthy');
   assert.equal(health.metrics.processed, 1);
@@ -119,6 +121,80 @@ test('worker moves a terminal sidecar failure to failed with a diagnostic record
   const health = JSON.parse(fs.readFileSync(path.join(fixture.logs, 'health.json'), 'utf8'));
   assert.equal(health.metrics.failed, 1);
   assert.match(health.lastError, /Missing sidecar transcript/);
+});
+
+test('worker treats an empty sidecar transcript as no speech and isolates it without an API request, retry, or failure', async (t) => {
+  const fixture = createWorkerFixture();
+  writeSegment(fixture.incoming, '20260711T120110.wav', '');
+  let requests = 0;
+  const server = await createApiServer((request, response) => {
+    requests += 1;
+    response.writeHead(201, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ event: { id: 'should-not-exist' } }));
+  });
+  t.after(async () => server.close());
+
+  const result = await runWorker(fixture, server.baseUrl, { ASR_STABLE_CHECK_MS: '1', ASR_RETRY_BASE_MS: '1' });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(requests, 0);
+  assert.equal(fs.readdirSync(fixture.failed).length, 0);
+  assert.equal(fs.readdirSync(fixture.processed).filter((name) => name.endsWith('.wav')).length, 0);
+  assert.equal(fs.readdirSync(fixture.skipped).filter((name) => name.endsWith('.wav')).length, 1);
+  const health = JSON.parse(fs.readFileSync(path.join(fixture.logs, 'health.json'), 'utf8'));
+  assert.equal(health.metrics.noSpeech, 1);
+  const logs = fs.readFileSync(path.join(fixture.logs, 'asr-worker.jsonl'), 'utf8');
+  assert.match(logs, /"type":"file_no_speech"/);
+  assert.doesNotMatch(logs, /"type":"transcribe_retry"/);
+});
+
+test('ASR_MAX_RETRIES=3 means three retries after the initial attempt', async (t) => {
+  const fixture = createWorkerFixture();
+  writeSegment(fixture.incoming, '20260711T120115.wav', 'This terminal API failure exercises retry semantics.');
+  let attempts = 0;
+  const server = await createApiServer((request, response) => {
+    attempts += 1;
+    response.writeHead(503, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ message: 'temporary outage' }));
+  });
+  t.after(async () => server.close());
+
+  const result = await runWorker(fixture, server.baseUrl, {
+    ASR_STABLE_CHECK_MS: '1',
+    ASR_MAX_RETRIES: '3',
+    ASR_RETRY_BASE_MS: '1',
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(attempts, 4);
+  const logs = fs.readFileSync(path.join(fixture.logs, 'asr-worker.jsonl'), 'utf8');
+  assert.equal((logs.match(/"type":"post_retry"/g) || []).length, 3);
+  assert.equal(fs.readdirSync(fixture.failed).filter((name) => name.endsWith('.wav')).length, 1);
+});
+
+test('worker falls back to complete APP Basic Auth credentials when empty ASR variables are present', async (t) => {
+  const fixture = createWorkerFixture();
+  writeSegment(fixture.incoming, '20260711T120118.wav', 'Fallback Basic Auth must use the local application credentials.');
+  const expectedAuthorization = `Basic ${Buffer.from('app-user:app-password').toString('base64')}`;
+  const server = await createApiServer((request, response) => {
+    if (request.headers.authorization !== expectedAuthorization) {
+      response.writeHead(401, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ message: 'Authentication required' }));
+      return;
+    }
+    response.writeHead(201, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ event: { id: 'evt-app-fallback-auth' } }));
+  });
+  t.after(async () => server.close());
+
+  const result = await runWorker(fixture, server.baseUrl, {
+    ASR_STABLE_CHECK_MS: '1',
+    ASR_API_USERNAME: '',
+    ASR_API_PASSWORD: '',
+    APP_USERNAME: 'app-user',
+    APP_PASSWORD: 'app-password',
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(fs.readdirSync(fixture.failed).length, 0);
+  assert.equal(fs.readdirSync(fixture.processed).filter((name) => name.endsWith('.wav')).length, 1);
 });
 
 test('worker bounds and prunes durable dedupe state on startup', async () => {
@@ -246,6 +322,89 @@ test('periodic scans reserve a file before its stable-file wait so it posts once
   assert.equal(fs.readdirSync(fixture.processed).filter((name) => name.endsWith('.wav')).length, 1);
 });
 
+test('a second worker for the same source is blocked before it can duplicate cloud work', async (t) => {
+  const fixture = createWorkerFixture();
+  const received = [];
+  const server = await createApiServer((request, response) => {
+    received.push(request.body);
+    response.writeHead(201, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ event: { id: `evt-exclusive-${received.length}` } }));
+  });
+  const first = runWorkerContinuously(fixture, server.baseUrl, {
+    ASR_POLL_MS: '10',
+    ASR_STABLE_CHECK_MS: '1',
+    ASR_RETRY_BASE_MS: '1',
+    ASR_WORKER_ID: 'first-worker',
+  });
+  t.after(async () => {
+    await stopWorker(first);
+    await server.close();
+  });
+
+  await waitForCondition(() => fs.existsSync(path.join(fixture.logs, 'health.json')), 1_500);
+  const second = await runWorker(fixture, server.baseUrl, {
+    ASR_WORKER_ID: 'second-worker',
+    ASR_RETRY_BASE_MS: '1',
+    ASR_RUNTIME_STATE_FILE: path.join(fixture.root, 'alternate-runtime', 'state.json'),
+  });
+  assert.equal(second.code, 3, second.stderr);
+  assert.match(second.stderr, /already running/i);
+
+  writeSegment(fixture.incoming, '20260711T120125.wav', 'Only the lock owner may send this segment to the transcript API.');
+  await waitForCondition(() => received.length === 1, 1_500);
+  assert.equal(received.length, 1);
+});
+
+test('a fresh initializing worker lock fails closed before it can send an ASR or event request', async (t) => {
+  const fixture = createWorkerFixture();
+  writeSegment(fixture.incoming, '20260711T120126.wav', 'A fresh lock must prevent duplicate cloud work.');
+  let received = 0;
+  const server = await createApiServer((request, response) => {
+    received += 1;
+    response.writeHead(201, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ event: { id: 'should-not-post' } }));
+  });
+  const lockPath = workerLockPath(fixture);
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true, mode: 0o700 });
+  fs.chmodSync(path.dirname(lockPath), 0o700);
+  fs.writeFileSync(lockPath, '', { mode: 0o600 });
+  t.after(async () => {
+    fs.rmSync(lockPath, { force: true });
+    await server.close();
+  });
+
+  const result = await runWorker(fixture, server.baseUrl, { ASR_WORKER_ID: 'initializing-lock-worker' });
+  assert.equal(result.code, 3, result.stderr);
+  assert.match(result.stderr, /initializing/i);
+  assert.equal(received, 0);
+  assert.equal(fs.existsSync(path.join(fixture.incoming, '20260711T120126.wav')), true);
+});
+
+test('workers with separate incoming directories do not contend only because they share a source ID', async (t) => {
+  const firstFixture = createWorkerFixture();
+  const secondFixture = createWorkerFixture();
+  const server = await createApiServer((request, response) => {
+    response.writeHead(201, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ event: { id: 'evt-isolated-worker' } }));
+  });
+  const first = runWorkerContinuously(firstFixture, server.baseUrl, {
+    ASR_POLL_MS: '10',
+    ASR_STABLE_CHECK_MS: '1',
+    ASR_WORKER_ID: 'first-isolated-worker',
+  });
+  t.after(async () => {
+    await stopWorker(first);
+    await server.close();
+  });
+
+  await waitForCondition(() => fs.existsSync(path.join(firstFixture.logs, 'health.json')), 1_500);
+  const second = await runWorker(secondFixture, server.baseUrl, {
+    ASR_WORKER_ID: 'second-isolated-worker',
+  });
+
+  assert.equal(second.code, 0, second.stderr);
+});
+
 test('worker aborts an overdue API request and isolates the segment for recovery', async (t) => {
   const fixture = createWorkerFixture();
   writeSegment(fixture.incoming, '20260711T120140.wav', 'This request should time out before the server responds.');
@@ -297,10 +456,22 @@ function createWorkerFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ig-asr-worker-'));
   const incoming = path.join(root, 'incoming');
   const processed = path.join(root, 'processed');
+  const skipped = path.join(root, 'skipped');
   const failed = path.join(root, 'failed');
   const logs = path.join(root, 'logs');
-  [incoming, processed, failed, logs].forEach((directory) => fs.mkdirSync(directory, { recursive: true }));
-  return { root, incoming, processed, failed, logs };
+  [incoming, processed, skipped, failed, logs].forEach(createPrivateDirectory);
+  return { root, incoming, processed, skipped, failed, logs };
+}
+
+function createPrivateDirectory(directory) {
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  fs.chmodSync(directory, 0o700);
+}
+
+function workerLockPath(fixture) {
+  const inputScope = fs.realpathSync(fixture.incoming);
+  const inputScopeHash = crypto.createHash('sha256').update(inputScope).digest('hex').slice(0, 16);
+  return path.join(repoRoot, 'audio', 'worker-locks', `asr-worker-bloomberg-tv-${inputScopeHash}.lock`);
 }
 
 function writeSegment(incoming, fileName, text) {
@@ -370,8 +541,10 @@ function runWorkerProcess(fixture, apiBase, { once, overrides }) {
       ASR_API_BASE: apiBase,
       ASR_WATCH_DIR: fixture.incoming,
       ASR_PROCESSED_DIR: fixture.processed,
+      ASR_SKIPPED_DIR: fixture.skipped,
       ASR_FAILED_DIR: fixture.failed,
       ASR_LOG_DIR: fixture.logs,
+      ASR_RUNTIME_STATE_FILE: path.join(fixture.root, 'asr-runtime.json'),
       ASR_WORKER_ID: 'test-worker',
       ...overrides,
     },

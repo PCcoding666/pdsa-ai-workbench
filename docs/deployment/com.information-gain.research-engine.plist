@@ -20,7 +20,7 @@
   </array>
 
   <key>WorkingDirectory</key>
-  <string>REPLACE_ME</string><!-- e.g. /Users/chengpeng/Documents/Information-Gain -->
+  <string>REPLACE_ME</string><!-- e.g. /absolute/path/to/Information-Gain -->
 
   <key>EnvironmentVariables</key>
   <dict>

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 
-import { buildStackPlan, stopManagedChildren } from '../scripts/asr-stack.js';
+import { buildStackPlan, isBlockedExitCode, stopManagedChildren } from '../scripts/asr-stack.js';
 
 test('stack keeps workers independent and blocks only the capture that shares a loopback device', () => {
   const plan = buildStackPlan({
@@ -36,4 +36,10 @@ test('stack waits for managed children to acknowledge SIGTERM before reporting s
 
   await stopManagedChildren(new Map([['bloomberg-tv:worker', child]]), { graceMs: 100, forceMs: 25 });
   assert.deepEqual(child.signals, ['SIGTERM']);
+});
+
+test('stack marks an exclusive-lock exit as blocked instead of scheduling another restart', () => {
+  assert.equal(isBlockedExitCode(3), true);
+  assert.equal(isBlockedExitCode(1), false);
+  assert.equal(isBlockedExitCode(null), false);
 });

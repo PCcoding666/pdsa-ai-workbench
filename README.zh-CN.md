@@ -47,11 +47,23 @@ npm run dev:all
 curl -X POST http://localhost:3002/api/events/transcripts \
   -H "Content-Type: application/json" \
   -d '{
+    "id": "transcript:bloomberg-tv:example-segment-001",
     "sourceId": "bloomberg-tv",
+    "sourceName": "Bloomberg TV",
     "timestamp": "2026-06-01T13:42:00Z",
-    "transcript": "NVIDIA and AMD are being discussed as investors focus on hyperscaler AI capex and data center demand."
+    "transcript": "NVIDIA and AMD are being discussed as investors focus on hyperscaler AI capex and data center demand.",
+    "audioWindow": {
+      "start": "2026-06-01T13:42:00Z",
+      "end": "2026-06-01T13:42:05Z",
+      "durationSeconds": 5
+    },
+    "audioFile": "audio/bloomberg-tv/processed/example-segment-001.wav",
+    "asrBackend": "funasr-realtime",
+    "workerId": "bloomberg-worker-example"
   }'
 ```
+
+如配置了 `APP_USERNAME`/`APP_PASSWORD`，该请求还必须携带对应的 HTTP Basic Auth；worker 会优先使用完整的 `ASR_API_USERNAME`/`ASR_API_PASSWORD`，两者均为空时才回退到完整的 `APP_*` 凭据。
 
 示例：创建研究任务：
 
@@ -181,10 +193,10 @@ Discovery run 现已由可执行的 V2 协议约束，而不是只保存展示�
 
 任何 Information Gain 系统演进、research workflow、source policy、dashboard、skill 或自动化规则的改动，都必须同步更新 Obsidian。
 
-当前 vault：
+默认 vault 是仓库 `data/obsidian` 下的本地、可移植同步目录。若要同步到实际 Obsidian vault，在忽略的 `.env` 中显式设置 `OBSIDIAN_VAULT_PATH`：
 
 ```text
-/Users/chengpeng/Documents/Obsidian Vault
+/path/to/your/Obsidian Vault
 ```
 
 本项目相关记录：
@@ -195,10 +207,10 @@ Discovery run 现已由可执行的 V2 协议约束，而不是只保存展示�
 
 Serenity run note 默认 frontmatter 包含 `run_id`、`run_mode`、`status`、`research_date`、`market_data_as_of`、`protocol_version` 和 `last_synced_at`。同步只覆盖 `run_id` 相同的文件；冲突或写入失败会记录为 sync failure，并阻止 Research Run 关闭。
 
-默认 archive 路径是：
+默认 archive 路径是 `data/serenity-archive.json`（文件不存在时 archive 为空）。如已有导出的 archive，在忽略的 `.env` 中显式设置：
 
 ```bash
-SERENITY_ARCHIVE_FILE="/Users/chengpeng/Downloads/serenity_2026-06-01.json"
+SERENITY_ARCHIVE_FILE="/path/to/serenity-export.json"
 ```
 
 自定义候选卡会保存到 `data/serenity-thesis-cards.json`。
@@ -261,7 +273,7 @@ AI 简报接口会在 `insights` 字段中输出：
 
 ## 访问保护与数据
 
-可通过环境变量启用 HTTP Basic Auth：
+默认 API 只监听 `127.0.0.1`，Vite 也只监听本机；默认不发送 `Access-Control-Allow-Origin`。如需本机 Basic Auth，可同时设置：
 
 ```bash
 APP_USERNAME="pdsa"
@@ -271,8 +283,11 @@ APP_PASSWORD="replace-with-a-strong-password"
 订阅和 VOC 项目默认保存到 `data/`，生产环境建议指定：
 
 ```bash
+install -d -m 700 /var/lib/pdsa-ai-workbench
 DATA_DIR="/var/lib/pdsa-ai-workbench"
 ```
+
+自定义 `DATA_DIR` 必须是专用 `0700` 目录；不要直接设为 `/tmp` 或其他共享目录。
 
 ### VOC 大模型分析
 

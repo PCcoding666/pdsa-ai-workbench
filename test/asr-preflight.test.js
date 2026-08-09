@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import * as preflight from '../scripts/asr-preflight.js';
 
-const { buildPreflightReport, checkApi, selectPreflightSources } = preflight;
+const { buildPreflightReport, checkApi, mergePreflightRuntimeState, selectPreflightSources } = preflight;
 
 test('preflight has no local Whisper dependency when FunASR realtime is selected', () => {
   const report = buildPreflightReport({
@@ -327,6 +327,50 @@ test('preflight source selection supports an explicitly requested disabled sourc
 
   assert.deepEqual(selectPreflightSources(sources, ['cnbc-live-tv']), [sources[1]]);
   assert.throws(() => selectPreflightSources(sources, ['unknown-tv']), /not configured/i);
+});
+
+test('single-source preflight preserves other configured source device mappings and removes only an unresolved selected mapping', () => {
+  const sources = [
+    { id: 'bloomberg-tv' },
+    { id: 'cnbc-live-tv' },
+  ];
+  const previousRuntime = {
+    version: 1,
+    devices: [{ index: 3, name: 'BlackHole Bloomberg' }, { index: 7, name: 'BlackHole CNBC' }],
+    sources: {
+      'bloomberg-tv': { deviceIndex: 3, deviceName: 'BlackHole Bloomberg', resolvedAt: '2026-07-10T00:00:00.000Z' },
+      'cnbc-live-tv': { deviceIndex: 6, deviceName: 'Old CNBC Device', resolvedAt: '2026-07-10T00:00:00.000Z' },
+      retired: { deviceIndex: 9, deviceName: 'Retired' },
+    },
+  };
+
+  const runtime = mergePreflightRuntimeState({
+    previousRuntime,
+    configuredSources: sources,
+    selectedSourceIds: ['cnbc-live-tv'],
+    devices: [{ index: 3, name: 'BlackHole Bloomberg' }, { index: 7, name: 'BlackHole CNBC' }],
+    resolvedSources: {
+      'cnbc-live-tv': { deviceIndex: 7, deviceName: 'BlackHole CNBC', resolvedAt: '2026-07-11T00:00:00.000Z' },
+    },
+    updatedAt: '2026-07-11T00:00:00.000Z',
+  });
+
+  assert.deepEqual(runtime.sources, {
+    'bloomberg-tv': previousRuntime.sources['bloomberg-tv'],
+    'cnbc-live-tv': { deviceIndex: 7, deviceName: 'BlackHole CNBC', resolvedAt: '2026-07-11T00:00:00.000Z' },
+  });
+
+  const unresolved = mergePreflightRuntimeState({
+    previousRuntime: runtime,
+    configuredSources: sources,
+    selectedSourceIds: ['cnbc-live-tv'],
+    devices: runtime.devices,
+    resolvedSources: {},
+    updatedAt: '2026-07-12T00:00:00.000Z',
+  });
+  assert.deepEqual(unresolved.sources, {
+    'bloomberg-tv': previousRuntime.sources['bloomberg-tv'],
+  });
 });
 
 test('preflight verifies a protected API endpoint with configured ASR credentials', async (t) => {

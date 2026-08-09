@@ -9,7 +9,11 @@ import {
   appendJsonlWithRotation,
   buildTranscriptPayload,
   createDedupeState,
+  tryCreateExclusiveJsonLock,
+  ensurePrivateDirectory,
+  ensurePrivateRuntimeDirectory,
   findLoopbackDevices,
+  isLoopbackHostname,
   isDuplicateAudio,
   isDuplicateText,
   isNonSilentSignal,
@@ -19,7 +23,10 @@ import {
   parseVolumedetectOutput,
   pruneFilesOlderThan,
   recordDedupe,
+  resolveApiCredentials,
   resolveDeviceIndex,
+  validateAsrApiBase,
+  writeJsonAtomic,
 } from '../scripts/asr-core.js';
 
 test('parses AVFoundation audio device indexes without hard-coding them', () => {
@@ -117,6 +124,36 @@ test('rotates bounded JSONL logs before appending new diagnostic entries', () =>
   assert.match(fs.readFileSync(filePath, 'utf8'), /second/);
 });
 
+test('atomically publishes a complete lock so an interleaving contender can never replace a live owner', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ig-asr-atomic-lock-'));
+  const lockPath = path.join(directory, 'worker.lock');
+  const firstOwner = { pid: 101, token: 'first-owner', acquiredAt: '2026-08-10T00:00:00.000Z' };
+  const secondOwner = { pid: 202, token: 'second-owner', acquiredAt: '2026-08-10T00:00:01.000Z' };
+  const originalLinkSync = fs.linkSync;
+  let interleaved = false;
+  let secondCreated = false;
+
+  fs.linkSync = (source, destination) => {
+    if (!interleaved && path.resolve(destination) === lockPath) {
+      interleaved = true;
+      secondCreated = tryCreateExclusiveJsonLock(lockPath, secondOwner);
+    }
+    return originalLinkSync(source, destination);
+  };
+  let firstCreated;
+  try {
+    firstCreated = tryCreateExclusiveJsonLock(lockPath, firstOwner);
+  } finally {
+    fs.linkSync = originalLinkSync;
+  }
+
+  assert.equal(interleaved, true);
+  assert.equal(secondCreated, true);
+  assert.equal(firstCreated, false);
+  assert.deepEqual(JSON.parse(fs.readFileSync(lockPath, 'utf8')), secondOwner);
+  assert.equal(fs.statSync(lockPath).mode & 0o777, 0o600);
+});
+
 test('loads source configuration using repo-relative paths and builds a complete event payload', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ig-asr-core-'));
   const configPath = path.join(tempRoot, 'sources.json');
@@ -137,13 +174,13 @@ test('loads source configuration using repo-relative paths and builds a complete
     audioFile: path.join(source.watchDir, '20260711T120000.wav'),
     startedAt: '2026-07-11T04:00:00.000Z',
     durationSeconds: 20,
-    asrBackend: 'whisper:base.en',
+    asrBackend: 'funasr-realtime',
     workerId: 'bloomberg-worker-test',
   });
 
   assert.equal(payload.sourceId, 'bloomberg-tv');
   assert.equal(payload.sourceName, 'Bloomberg TV');
-  assert.equal(payload.asrBackend, 'whisper:base.en');
+  assert.equal(payload.asrBackend, 'funasr-realtime');
   assert.equal(payload.workerId, 'bloomberg-worker-test');
   assert.deepEqual(payload.audioWindow, {
     start: '2026-07-11T04:00:00.000Z',
@@ -164,4 +201,66 @@ test('repository Bloomberg and CNBC sources default to DashScope FunASR realtime
     assert.equal(source.language, 'en');
     assert.ok(source.segmentSeconds <= 5, 'live TV segments should not wait for a 20-second local batch');
   }
+});
+
+test('rejects a remote plaintext ASR API while permitting loopback HTTP and HTTPS', () => {
+  assert.equal(isLoopbackHostname('127.0.0.1'), true);
+  assert.equal(isLoopbackHostname('localhost'), true);
+  assert.equal(isLoopbackHostname('203.0.113.10'), false);
+  assert.equal(validateAsrApiBase('http://127.0.0.1:3002/'), 'http://127.0.0.1:3002');
+  assert.equal(validateAsrApiBase('https://api.example.test/v1/'), 'https://api.example.test/v1');
+  assert.throws(() => validateAsrApiBase('http://api.example.test:3002'), /loopback/i);
+  assert.throws(() => validateAsrApiBase('ftp://127.0.0.1'), /http or https/i);
+});
+
+test('resolves only complete explicit ASR credentials and otherwise falls back to complete app credentials', () => {
+  assert.deepEqual(resolveApiCredentials({
+    ASR_API_USERNAME: '',
+    ASR_API_PASSWORD: '',
+    APP_USERNAME: 'app-user',
+    APP_PASSWORD: 'app-password',
+  }), {
+    username: 'app-user',
+    password: 'app-password',
+    source: 'APP_*',
+  });
+  assert.deepEqual(resolveApiCredentials({
+    ASR_API_USERNAME: 'asr-user',
+    ASR_API_PASSWORD: 'asr-password',
+    APP_USERNAME: 'app-user',
+    APP_PASSWORD: 'app-password',
+  }), {
+    username: 'asr-user',
+    password: 'asr-password',
+    source: 'ASR_API_*',
+  });
+  assert.throws(() => resolveApiCredentials({ ASR_API_USERNAME: 'asr-user', ASR_API_PASSWORD: '' }), /set together/i);
+  assert.throws(() => resolveApiCredentials({ APP_USERNAME: 'app-user', APP_PASSWORD: '' }), /set together/i);
+});
+
+test('creates ASR runtime directories and durable state files with owner-only permissions', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ig-asr-private-runtime-'));
+  const runtimeDir = path.join(root, 'audio-runtime');
+  const statePath = path.join(runtimeDir, 'state.json');
+
+  ensurePrivateDirectory(runtimeDir);
+  writeJsonAtomic(statePath, { ready: true });
+
+  assert.equal(fs.statSync(runtimeDir).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(statePath).mode & 0o777, 0o600);
+});
+
+test('never chmods an existing parent while enforcing a dedicated private runtime directory', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ig-asr-private-parent-'));
+  const sharedParent = path.join(root, 'shared-parent');
+  fs.mkdirSync(sharedParent, { mode: 0o755 });
+  fs.chmodSync(sharedParent, 0o755);
+  const dedicatedRuntime = path.join(sharedParent, 'asr-runtime');
+
+  ensurePrivateDirectory(dedicatedRuntime, { enforceExisting: true });
+  assert.equal(fs.statSync(sharedParent).mode & 0o777, 0o755);
+  assert.equal(fs.statSync(dedicatedRuntime).mode & 0o777, 0o700);
+
+  assert.throws(() => ensurePrivateRuntimeDirectory(sharedParent), /owner-private/i);
+  assert.equal(fs.statSync(sharedParent).mode & 0o777, 0o755);
 });

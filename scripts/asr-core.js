@@ -8,6 +8,7 @@ const __dirname = path.dirname(__filename);
 export const REPO_ROOT = path.resolve(__dirname, '..');
 
 const LOOPBACK_DEVICE_PATTERN = /blackhole|loopback|soundflower|vb[- ]?cable|virtual\s*audio|aggregate|multi[- ]?output/i;
+export const LOCK_INITIALIZATION_GRACE_MS = 5_000;
 
 export function loadSourceConfig({ configPath = process.env.ASR_SOURCE_CONFIG || path.join(REPO_ROOT, 'config', 'asr-sources.json'), sourceId, rootDir = REPO_ROOT } = {}) {
   const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -22,7 +23,7 @@ export function loadSourceConfig({ configPath = process.env.ASR_SOURCE_CONFIG ||
   if (!id) throw new Error('ASR source config requires an id');
 
   const sourceRoot = resolvePath(rootDir, merged.rootDir || path.join('audio', id));
-  const apiBase = cleanText(process.env.ASR_API_BASE || merged.apiBase || 'http://127.0.0.1:3002').replace(/\/+$/, '');
+  const apiBase = validateAsrApiBase(process.env.ASR_API_BASE || merged.apiBase || 'http://127.0.0.1:3002');
   return {
     ...merged,
     id,
@@ -46,6 +47,7 @@ export function loadSourceConfig({ configPath = process.env.ASR_SOURCE_CONFIG ||
     stagingDir: resolvePath(rootDir, merged.stagingDir || path.join(sourceRoot, 'staging')),
     watchDir: resolvePath(rootDir, process.env.ASR_WATCH_DIR || merged.watchDir || path.join(sourceRoot, 'incoming')),
     processedDir: resolvePath(rootDir, process.env.ASR_PROCESSED_DIR || merged.processedDir || path.join(sourceRoot, 'processed')),
+    skippedDir: resolvePath(rootDir, process.env.ASR_SKIPPED_DIR || merged.skippedDir || path.join(sourceRoot, 'skipped')),
     failedDir: resolvePath(rootDir, process.env.ASR_FAILED_DIR || merged.failedDir || path.join(sourceRoot, 'failed')),
     logDir: resolvePath(rootDir, process.env.ASR_LOG_DIR || merged.logDir || path.join(sourceRoot, 'logs')),
     runtimeStateFile: resolvePath(rootDir, process.env.ASR_RUNTIME_STATE_FILE || merged.runtimeStateFile || path.join('audio', 'asr-runtime.json')),
@@ -207,6 +209,49 @@ export function buildTranscriptPayload({ source, audioHash, transcript, audioFil
   };
 }
 
+export function isLoopbackHostname(value) {
+  const hostname = cleanText(value).replace(/^\[|\]$/g, '').toLowerCase();
+  if (hostname === 'localhost' || hostname === '::1' || hostname === '0:0:0:0:0:0:0:1') return true;
+  const ipv4 = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!ipv4) return false;
+  const octets = ipv4.slice(1).map(Number);
+  return octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255) && octets[0] === 127;
+}
+
+export function validateAsrApiBase(value) {
+  const raw = cleanText(value).replace(/\/+$/, '');
+  let endpoint;
+  try {
+    endpoint = new URL(raw);
+  } catch {
+    throw new Error(`ASR API base must be a valid http or https URL: ${raw || '(empty)'}`);
+  }
+  if (!['http:', 'https:'].includes(endpoint.protocol)) {
+    throw new Error(`ASR API base must use http or https: ${endpoint.protocol || raw}`);
+  }
+  if (endpoint.protocol === 'http:' && !isLoopbackHostname(endpoint.hostname)) {
+    throw new Error('Remote plaintext ASR API URLs are blocked. Use a loopback http:// address or an https:// endpoint.');
+  }
+  return endpoint.toString().replace(/\/+$/, '');
+}
+
+export function resolveApiCredentials(env = process.env) {
+  const asrUsername = cleanText(env?.ASR_API_USERNAME);
+  const asrPassword = cleanText(env?.ASR_API_PASSWORD);
+  if (asrUsername || asrPassword) {
+    if (!asrUsername || !asrPassword) throw new Error('ASR_API_USERNAME and ASR_API_PASSWORD must be set together when API Basic Auth is enabled');
+    return { username: asrUsername, password: asrPassword, source: 'ASR_API_*' };
+  }
+
+  const appUsername = cleanText(env?.APP_USERNAME);
+  const appPassword = cleanText(env?.APP_PASSWORD);
+  if (appUsername || appPassword) {
+    if (!appUsername || !appPassword) throw new Error('APP_USERNAME and APP_PASSWORD must be set together when API Basic Auth is enabled');
+    return { username: appUsername, password: appPassword, source: 'APP_*' };
+  }
+  return null;
+}
+
 export function readJsonFile(filePath, fallback) {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -215,23 +260,145 @@ export function readJsonFile(filePath, fallback) {
   }
 }
 
+export function tryCreateExclusiveJsonLock(filePath, value) {
+  const resolved = path.resolve(filePath);
+  ensurePrivateDirectory(path.dirname(resolved));
+  const temporaryPath = path.join(
+    path.dirname(resolved),
+    `.${path.basename(resolved)}.${process.pid}.${crypto.randomUUID()}.tmp`,
+  );
+
+  try {
+    const descriptor = fs.openSync(temporaryPath, 'wx', 0o600);
+    try {
+      fs.writeFileSync(descriptor, `${JSON.stringify(value)}\n`, 'utf8');
+      fs.fchmodSync(descriptor, 0o600);
+    } finally {
+      fs.closeSync(descriptor);
+    }
+    try {
+      fs.linkSync(temporaryPath, resolved);
+      ensurePrivateFile(resolved);
+      return true;
+    } catch (error) {
+      if (error.code === 'EEXIST') return false;
+      throw error;
+    }
+  } finally {
+    try {
+      fs.unlinkSync(temporaryPath);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+}
+
+export function isFreshMalformedJsonLock(filePath, value, {
+  now = Date.now(),
+  graceMs = LOCK_INITIALIZATION_GRACE_MS,
+} = {}) {
+  if (hasCompleteLockOwner(value)) return false;
+  const grace = Math.max(0, Number(graceMs) || 0);
+  if (!grace) return false;
+  try {
+    const stat = fs.statSync(filePath);
+    return stat.isFile() && stat.mtimeMs >= Number(now) - grace;
+  } catch {
+    return false;
+  }
+}
+
+export function tryReclaimStaleJsonLock(filePath, {
+  isProcessAlive = () => false,
+  now = Date.now(),
+  graceMs = LOCK_INITIALIZATION_GRACE_MS,
+} = {}) {
+  const recoveryGuard = tryAcquireStaleLockRecoveryGuard(filePath);
+  if (!recoveryGuard) return { status: 'recovery-locked' };
+
+  try {
+    if (!fs.existsSync(filePath)) return { status: 'absent' };
+    const current = readJsonFile(filePath, {});
+    const pid = Number(current?.pid);
+    if (Number.isInteger(pid) && pid > 0 && isProcessAlive(pid)) {
+      return { status: 'live', owner: current };
+    }
+    if (isFreshMalformedJsonLock(filePath, current, { now, graceMs })) {
+      return { status: 'initializing', owner: current };
+    }
+    try {
+      fs.unlinkSync(filePath);
+    } catch (error) {
+      if (error.code === 'ENOENT') return { status: 'absent' };
+      throw error;
+    }
+    return { status: 'reclaimed', owner: current };
+  } finally {
+    releaseJsonLockIfOwned(recoveryGuard);
+  }
+}
+
 export function writeJsonAtomic(filePath, value) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  ensurePrivateDirectory(path.dirname(filePath));
   const temporaryPath = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  fs.writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  fs.renameSync(temporaryPath, filePath);
+  const descriptor = fs.openSync(temporaryPath, 'wx', 0o600);
+  try {
+    fs.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    fs.fchmodSync(descriptor, 0o600);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  try {
+    fs.renameSync(temporaryPath, filePath);
+    ensurePrivateFile(filePath);
+  } catch (error) {
+    try { fs.unlinkSync(temporaryPath); } catch (cleanupError) { if (cleanupError.code !== 'ENOENT') throw cleanupError; }
+    throw error;
+  }
 }
 
 export function appendJsonlWithRotation(filePath, value, { maxBytes = 10 * 1024 * 1024, maxRotatedFiles = 5 } = {}) {
   const line = `${JSON.stringify(value)}\n`;
   const normalizedMaxBytes = Math.max(1, Number(maxBytes) || 1);
   const normalizedMaxRotatedFiles = Math.max(0, Math.floor(Number(maxRotatedFiles) || 0));
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  ensurePrivateDirectory(path.dirname(filePath));
   const existingSize = snapshotFile(filePath).size;
   if (existingSize > 0 && existingSize + Buffer.byteLength(line) > normalizedMaxBytes) {
     rotateFile(filePath, normalizedMaxRotatedFiles);
   }
   fs.appendFileSync(filePath, line, { encoding: 'utf8', mode: 0o600 });
+  ensurePrivateFile(filePath);
+}
+
+export function ensurePrivateDirectory(directory, { enforceExisting = false } = {}) {
+  if (!directory) throw new Error('A runtime directory path is required.');
+  const resolved = path.resolve(directory);
+  const existed = fs.existsSync(resolved);
+  fs.mkdirSync(resolved, { recursive: true, mode: 0o700 });
+  const stat = fs.statSync(resolved);
+  if (!stat.isDirectory()) throw new Error(`Runtime path is not a directory: ${resolved}`);
+  if (!existed || enforceExisting) fs.chmodSync(resolved, 0o700);
+  return resolved;
+}
+
+export function ensurePrivateRuntimeDirectory(directory, { managedRoot = path.join(REPO_ROOT, 'audio') } = {}) {
+  if (!directory) throw new Error('A runtime directory path is required.');
+  const resolved = path.resolve(directory);
+  const normalizedManagedRoot = path.resolve(managedRoot);
+  const managedByRepository = resolved === normalizedManagedRoot || resolved.startsWith(`${normalizedManagedRoot}${path.sep}`);
+  const existed = fs.existsSync(resolved);
+  ensurePrivateDirectory(resolved, { enforceExisting: managedByRepository });
+  const mode = fs.statSync(resolved).mode & 0o777;
+  if (!managedByRepository && existed && (mode & 0o077) !== 0) {
+    throw new Error(`Runtime directory must be a dedicated owner-private directory (0700): ${resolved}`);
+  }
+  return resolved;
+}
+
+export function ensurePrivateFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return false;
+  fs.chmodSync(filePath, 0o600);
+  return true;
 }
 
 export function pruneFilesOlderThan({ directory, olderThanMs, now = Date.now(), predicate = () => true } = {}) {
@@ -265,6 +432,36 @@ export function cleanText(value) {
 function resolvePath(rootDir, value) {
   const candidate = String(value || '');
   return path.isAbsolute(candidate) ? candidate : path.resolve(rootDir, candidate);
+}
+
+function hasCompleteLockOwner(value) {
+  const pid = Number(value?.pid);
+  return Number.isInteger(pid) && pid > 0 && Boolean(cleanText(value?.token));
+}
+
+function tryAcquireStaleLockRecoveryGuard(filePath) {
+  const guardPath = `${path.resolve(filePath)}.recovery.lock`;
+  const owner = {
+    pid: process.pid,
+    token: crypto.randomUUID(),
+    acquiredAt: new Date().toISOString(),
+    purpose: 'stale-lock-recovery',
+  };
+  if (!tryCreateExclusiveJsonLock(guardPath, owner)) return null;
+  return { lockPath: guardPath, owner };
+}
+
+function releaseJsonLockIfOwned(lock) {
+  if (!lock?.lockPath || !lock?.owner?.token) return false;
+  const current = readJsonFile(lock.lockPath, {});
+  if (current.token !== lock.owner.token) return false;
+  try {
+    fs.unlinkSync(lock.lockPath);
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
 }
 
 function rotateFile(filePath, maxRotatedFiles) {

@@ -9,16 +9,24 @@ import {
   buildTranscriptPayload,
   cleanText,
   createDedupeState,
+  ensurePrivateDirectory,
+  ensurePrivateFile,
+  ensurePrivateRuntimeDirectory,
   hashFile,
   hashText,
+  isFreshMalformedJsonLock,
   isDuplicateAudio,
   isDuplicateText,
   isStableSnapshot,
   loadSourceConfig,
   readJsonFile,
   recordDedupe,
+  REPO_ROOT,
+  resolveApiCredentials,
   pruneFilesOlderThan,
   snapshotFile,
+  tryCreateExclusiveJsonLock,
+  tryReclaimStaleJsonLock,
   writeJsonAtomic,
 } from './asr-core.js';
 
@@ -59,7 +67,7 @@ const DEDUPE_JOURNAL_FILE = path.join(source.logDir, 'dedupe.jsonl');
 const HEALTH_FILE = path.join(source.logDir, 'health.json');
 let apiAuth;
 try {
-  apiAuth = resolveApiAuth();
+  apiAuth = resolveApiCredentials();
 } catch (error) {
   console.error(`[asr-worker] configuration error: ${error.message}`);
   process.exit(2);
@@ -76,6 +84,7 @@ let scanTimer = null;
 let scanInProgress = false;
 let shutdownRequested = false;
 let shutdownPromise = null;
+let workerLock = null;
 const health = {
   sourceId: source.id,
   sourceName: source.sourceName,
@@ -84,26 +93,34 @@ const health = {
   startedAt: new Date().toISOString(),
   backend: source.asrBackend,
   model: source.asrModel,
-  metrics: { processed: 0, failed: 0, duplicate: 0, retries: 0 },
+  metrics: { processed: 0, failed: 0, duplicate: 0, noSpeech: 0, retries: 0 },
   lastError: '',
   lastEventId: '',
-  retention: { lastCheckedAt: '', processedRemoved: 0, failedRemoved: 0 },
+  retention: { lastCheckedAt: '', processedRemoved: 0, skippedRemoved: 0, failedRemoved: 0 },
 };
 
 process.on('SIGTERM', () => { void requestShutdown('SIGTERM'); });
 process.on('SIGINT', () => { void requestShutdown('SIGINT'); });
 
 main().catch((error) => {
+  if (isWorkerLockError(error)) {
+    console.error(`[asr-worker] blocked: ${cleanText(error.message)}`);
+    process.exitCode = 3;
+    return;
+  }
   health.status = 'failed';
   health.lastError = cleanText(error.stack || error.message);
   writeHealth();
   logEvent('worker_fatal', { error: health.lastError });
   console.error(`[asr-worker] fatal: ${health.lastError}`);
+  releaseWorkerLock();
   process.exitCode = 1;
 });
 
 async function main() {
+  process.umask(0o077);
   ensureDirs();
+  workerLock = acquireWorkerLock();
   persistDedupeState({ force: true });
   logEvent('worker_start', {
     sourceId: source.id,
@@ -126,7 +143,10 @@ async function main() {
     await shutdownPromise;
     return;
   }
-  if (ONCE) return;
+  if (ONCE) {
+    releaseWorkerLock();
+    return;
+  }
 
   scanTimer = setInterval(() => { void runScan('scheduled'); }, source.pollMs);
 }
@@ -208,7 +228,21 @@ async function processFile(filePath) {
     }
 
     const result = await withRetries('transcribe', () => transcribe(filePath));
-    if (!result.text) throw new Error('ASR returned empty transcript');
+    if (result.noSpeech || !cleanText(result.text)) {
+      recordDurableDedupe({ sourceId: source.id, audioHash, timestampMs: new Date(startedAt).getTime() });
+      const destination = moveAssets(filePath, createDestination(source.skippedDir, basename));
+      health.metrics.noSpeech += 1;
+      health.lastError = '';
+      writeHealth();
+      logEvent('file_no_speech', {
+        filePath,
+        destination,
+        backend: result.backend,
+        processingLatencyMs: Date.now() - processingStartedMs,
+      });
+      console.log(`[asr-worker] skipped no-speech segment ${basename}`);
+      return;
+    }
     const textHash = hashText(result.text);
     if (isDuplicateText(dedupeState, {
       sourceId: source.id,
@@ -294,7 +328,7 @@ async function processFile(filePath) {
 }
 
 async function withRetries(type, operation) {
-  const maximumAttempts = Math.max(1, source.maxRetries);
+  const maximumAttempts = Math.max(1, source.maxRetries + 1);
   let lastError;
   for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
     if (shutdownRequested) throw shutdownError();
@@ -323,7 +357,8 @@ async function transcribe(filePath) {
 async function transcribeFromSidecar(filePath) {
   const sidecarPath = `${filePath}.txt`;
   if (!fs.existsSync(sidecarPath)) throw new Error(`Missing sidecar transcript: ${sidecarPath}`);
-  return { backend: 'sidecar', text: cleanText(fs.readFileSync(sidecarPath, 'utf8')), segments: [] };
+  const text = cleanText(fs.readFileSync(sidecarPath, 'utf8'));
+  return { backend: 'sidecar', text, noSpeech: !text, segments: [] };
 }
 
 async function transcribeWithFunASRRealtime(filePath) {
@@ -338,10 +373,23 @@ async function transcribeWithFunASRRealtime(filePath) {
     filePath,
     '--language', source.language,
     '--model', source.asrModel,
+    '--json',
   ], { timeoutMs: TIMEOUT_MS });
-  const text = cleanText(result.stdout);
-  if (!text) throw new Error('FunASR realtime adapter returned empty transcript');
-  return { backend: 'funasr-realtime', text, segments: [] };
+  const output = String(result.stdout || '').trim();
+  let adapterResult;
+  try {
+    adapterResult = JSON.parse(output);
+  } catch {
+    const text = cleanText(output);
+    return { backend: 'funasr-realtime', text, noSpeech: !text, segments: [] };
+  }
+  const text = cleanText(adapterResult?.text);
+  return {
+    backend: cleanText(adapterResult?.backend) || 'funasr-realtime',
+    text,
+    noSpeech: Boolean(adapterResult?.noSpeech) || !text,
+    segments: [],
+  };
 }
 
 async function resolveAudioDurationSeconds(filePath) {
@@ -482,11 +530,13 @@ function runCommand(command, commandArgs, { timeoutMs }) {
 }
 
 function ensureDirs() {
-  [source.watchDir, source.processedDir, source.failedDir, source.logDir].forEach((directory) => fs.mkdirSync(directory, { recursive: true }));
+  ensurePrivateRuntimeDirectory(path.dirname(source.runtimeStateFile));
+  [source.watchDir, source.processedDir, source.skippedDir, source.failedDir, source.logDir]
+    .forEach(ensurePrivateRuntimeDirectory);
 }
 
 function createDestination(directory, basename) {
-  fs.mkdirSync(directory, { recursive: true });
+  ensurePrivateRuntimeDirectory(directory);
   const candidate = path.join(directory, `${Date.now()}-${basename}`);
   return fs.existsSync(candidate) ? path.join(directory, `${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${basename}`) : candidate;
 }
@@ -505,10 +555,15 @@ function safeArtifactPathComponent(value, fallback) {
 }
 
 function moveAssets(filePath, destination) {
-  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  ensurePrivateRuntimeDirectory(path.dirname(destination));
   fs.renameSync(filePath, destination);
+  ensurePrivateFile(destination);
   const sidecarPath = `${filePath}.txt`;
-  if (fs.existsSync(sidecarPath)) fs.renameSync(sidecarPath, `${destination}.txt`);
+  if (fs.existsSync(sidecarPath)) {
+    const destinationSidecar = `${destination}.txt`;
+    fs.renameSync(sidecarPath, destinationSidecar);
+    ensurePrivateFile(destinationSidecar);
+  }
   return destination;
 }
 
@@ -542,15 +597,18 @@ function runRetention({ force = false } = {}) {
   lastRetentionCheckAt = now;
   try {
     const processed = pruneFilesOlderThan({ directory: source.processedDir, olderThanMs: AUDIO_RETENTION_MS, now });
+    const skipped = pruneFilesOlderThan({ directory: source.skippedDir, olderThanMs: AUDIO_RETENTION_MS, now });
     const failed = pruneFilesOlderThan({ directory: source.failedDir, olderThanMs: FAILED_RETENTION_MS, now });
     health.retention = {
       lastCheckedAt: new Date(now).toISOString(),
       processedRemoved: processed.length,
+      skippedRemoved: skipped.length,
       failedRemoved: failed.length,
     };
-    if (processed.length || failed.length) {
+    if (processed.length || skipped.length || failed.length) {
       logEvent('retention_pruned', {
         processedRemoved: processed.length,
+        skippedRemoved: skipped.length,
         failedRemoved: failed.length,
         audioRetentionMs: AUDIO_RETENTION_MS,
         failedRetentionMs: FAILED_RETENTION_MS,
@@ -579,6 +637,7 @@ function persistDedupeState({ force = false } = {}) {
 function recordDurableDedupe(entry) {
   dedupeState = recordDedupe(dedupeState, entry);
   fs.appendFileSync(DEDUPE_JOURNAL_FILE, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', mode: 0o600 });
+  ensurePrivateFile(DEDUPE_JOURNAL_FILE);
   persistDedupeState();
 }
 
@@ -605,6 +664,7 @@ function truncateDedupeJournal() {
   const temporaryPath = `${DEDUPE_JOURNAL_FILE}.${process.pid}.${crypto.randomUUID()}.tmp`;
   fs.writeFileSync(temporaryPath, '', { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(temporaryPath, DEDUPE_JOURNAL_FILE);
+  ensurePrivateFile(DEDUPE_JOURNAL_FILE);
 }
 
 function compactDedupeState(state, now) {
@@ -621,15 +681,99 @@ function compactDedupeState(state, now) {
   });
 }
 
-function resolveApiAuth() {
-  const hasExplicitCredentials = Object.hasOwn(process.env, 'ASR_API_USERNAME') || Object.hasOwn(process.env, 'ASR_API_PASSWORD');
-  const username = cleanText(hasExplicitCredentials ? process.env.ASR_API_USERNAME : process.env.APP_USERNAME);
-  const password = cleanText(hasExplicitCredentials ? process.env.ASR_API_PASSWORD : process.env.APP_PASSWORD);
-  if (Boolean(username) !== Boolean(password)) {
-    const prefix = hasExplicitCredentials ? 'ASR_API_USERNAME and ASR_API_PASSWORD' : 'APP_USERNAME and APP_PASSWORD';
-    throw new Error(`${prefix} must be set together when API Basic Auth is enabled`);
+function acquireWorkerLock() {
+  const lockDir = workerLockDirectory();
+  const inputScope = canonicalWorkerInputScope();
+  const inputScopeHash = crypto.createHash('sha256').update(inputScope).digest('hex').slice(0, 16);
+  const lockPath = path.join(lockDir, `asr-worker-${safeArtifactPathComponent(source.id, 'source')}-${inputScopeHash}.lock`);
+  const owner = {
+    sourceId: source.id,
+    inputScope,
+    workerId: WORKER_ID,
+    pid: process.pid,
+    token: crypto.randomUUID(),
+    acquiredAt: new Date().toISOString(),
+  };
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (tryCreateExclusiveJsonLock(lockPath, owner)) {
+      return { lockPath, owner };
+    }
+    const existing = readJsonFile(lockPath, {});
+    if (isProcessAlive(Number(existing?.pid))) {
+      const lockError = new Error(`ASR worker for ${source.id} is already running (pid ${existing.pid}, worker ${cleanText(existing.workerId) || 'unknown'}).`);
+      lockError.code = 'ASR_WORKER_LOCKED';
+      throw lockError;
+    }
+    if (isFreshMalformedJsonLock(lockPath, existing)) {
+      const lockError = new Error(`ASR worker lock for ${source.id} is still initializing; retry shortly instead of starting a second worker.`);
+      lockError.code = 'ASR_WORKER_LOCKED';
+      throw lockError;
+    }
+    const recovery = tryReclaimStaleJsonLock(lockPath, { isProcessAlive });
+    if (recovery.status === 'reclaimed' || recovery.status === 'absent') continue;
+    if (recovery.status === 'live') {
+      const lockError = new Error(`ASR worker for ${source.id} is already running (pid ${recovery.owner?.pid || 'unknown'}, worker ${cleanText(recovery.owner?.workerId) || 'unknown'}).`);
+      lockError.code = 'ASR_WORKER_LOCKED';
+      throw lockError;
+    }
+    if (recovery.status === 'initializing') {
+      const lockError = new Error(`ASR worker lock for ${source.id} is still initializing; retry shortly instead of starting a second worker.`);
+      lockError.code = 'ASR_WORKER_LOCKED';
+      throw lockError;
+    }
+    const lockError = new Error(`ASR worker stale-lock recovery for ${source.id} is already in progress or requires manual review; do not start a second worker.`);
+    lockError.code = 'ASR_WORKER_LOCKED';
+    throw lockError;
   }
-  return username ? { username, password } : null;
+  const lockError = new Error(`Could not acquire ASR worker lock for ${source.id}; another process changed the lock repeatedly.`);
+  lockError.code = 'ASR_WORKER_LOCKED';
+  throw lockError;
+}
+
+function releaseWorkerLock() {
+  if (!workerLock?.lockPath || !workerLock?.owner?.token) return false;
+  const lock = workerLock;
+  workerLock = null;
+  const current = readJsonFile(lock.lockPath, {});
+  if (current.token !== lock.owner.token) return false;
+  try {
+    fs.unlinkSync(lock.lockPath);
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+function isWorkerLockError(error) {
+  return error?.code === 'ASR_WORKER_LOCKED';
+}
+
+function workerLockDirectory() {
+  const audioRoot = path.join(REPO_ROOT, 'audio');
+  ensurePrivateDirectory(audioRoot, { enforceExisting: true });
+  const lockDir = path.join(audioRoot, 'worker-locks');
+  ensurePrivateDirectory(lockDir, { enforceExisting: true });
+  return lockDir;
+}
+
+function canonicalWorkerInputScope() {
+  try {
+    return fs.realpathSync.native?.(source.watchDir) || fs.realpathSync(source.watchDir);
+  } catch {
+    return path.resolve(source.watchDir);
+  }
+}
+
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
 }
 
 function shutdownError() {
@@ -669,6 +813,7 @@ async function requestShutdown(signal) {
     health.status = process.exitCode === 1 ? 'failed' : 'stopped';
     writeHealth();
     logEvent('worker_stopped', { signal, forced: process.exitCode === 1 });
+    releaseWorkerLock();
   })();
   return shutdownPromise;
 }
